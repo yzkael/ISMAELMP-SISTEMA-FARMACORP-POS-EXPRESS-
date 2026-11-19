@@ -40,26 +40,30 @@ La capa de presentación es una **aplicación de consola**.
 
 ## Arquitectura
 
-El sistema sigue una **Arquitectura N-Capas**, donde cada capa tiene una responsabilidad única y solo depende de las capas inferiores (o de abstracciones):
+El sistema sigue una **Arquitectura N-Capas** de cinco proyectos. Cada capa tiene una única responsabilidad y solo conoce a la capa de abajo:
 
 ```
 ┌──────────────────────────────────────────┐
-│   Capa de Presentación (Consola)         │  Menús, captura de datos, composición de dependencias (IoC)
+│   Presentación (ConsoleApp)              │  Controllers: leen la consola y llaman a los servicios
+└───────────────────┬──────────────────────┘  Program.cs: contenedor de IoC
+                    │
+┌───────────────────▼──────────────────────┐
+│   Servicios (Services)                   │  Transacciones, Reglas de Negocio 1 a 5,
+└───────────────────┬──────────────────────┘  estrategias Base y GanaMax
+                    │  IUnitOfWork
+┌───────────────────▼──────────────────────┐
+│   Repositorios (Repositories)            │  IRepository<T>, UnitOfWork
 └───────────────────┬──────────────────────┘
                     │
 ┌───────────────────▼──────────────────────┐
-│   Capa de Negocio (Servicios)            │  Transacciones y Reglas de Negocio 1 a 5
-└───────────────────┬──────────────────────┘
-                    │  (interfaces IUnitOfWork / IRepository)
-┌───────────────────▼──────────────────────┐
-│   Capa de Acceso a Datos                 │  DbContext, Fluent API, Repositories, UnitOfWork
+│   Infraestructura (Infrastructure)       │  DbContext, Fluent API, migraciones
 └───────────────────┬──────────────────────┘
                     │
 ┌───────────────────▼──────────────────────┐
-│   Capa de Dominio (Entidades)            │  Entidades del módulo Express y del módulo ERP
+│   Dominio (Domain)                       │  Entidades del módulo Express y del módulo ERP
 └──────────────────────────────────────────┘
-                    │
-              SQL Server LocalDB
+
+              SQL Server LocalDB  ◄── solo Infrastructure habla con la base
 ```
 
 ---
@@ -84,30 +88,39 @@ FarmacorpPOSExpress.sln
 │           ├── ErpProducto.cs           # Costo, UniqueCodigo, Stock (PK = FK a ExpProducto)
 │           └── CodigoBarra.cs           # Códigos de barras asignados a un producto
 │
-├── FarmacorpPOS.DataAccess/             # Capa de Acceso a Datos
-│   ├── Context/
-│   │   └── FarmacorpDbContext.cs
-│   ├── Configurations/                  # Fluent API (una clase por entidad)
-│   ├── Repositories/
-│   │   ├── Interfaces/IRepository.cs
-│   │   └── Repository.cs
-│   ├── UnitOfWork/
+├── FarmacorpPOS.Infrastructure/         # Capa de Infraestructura
+│   ├── Data/
+│   │   ├── FarmacorpDbContext.cs
+│   │   ├── FarmacorpDbContextSeeder.cs  # Migra y carga los datos iniciales al arrancar
+│   │   ├── Configurations/              # Fluent API, una clase por entidad
+│   │   │   ├── Express/
+│   │   │   │   ├── Productos/
+│   │   │   │   ├── Categorias/
+│   │   │   │   └── Ventas/
+│   │   │   └── Erp/
+│   │   └── Migrations/
+│   └── DependencyInjection.cs           # AddInfrastructureServices()
+│
+├── FarmacorpPOS.Repositories/           # Capa de Repositorios
+│   ├── IRepository.cs
+│   ├── Repository.cs
+│   ├── UnitsOfWork/
 │   │   ├── IUnitOfWork.cs
 │   │   └── UnitOfWork.cs
-│   └── Migrations/
+│   └── DependencyInjection.cs           # AddRepositoryServices()
 │
-├── FarmacorpPOS.Business/               # Capa de Negocio
-│   ├── Interfaces/
-│   └── Services/
-│       ├── ProductoService.cs           # Registro Nuevo Producto ERP
-│       ├── CodigoBarraService.cs        # Asignación de Códigos de Barras
-│       ├── CategoriaService.cs          # Asignación de Categorías
-│       └── VentaService.cs              # Registro de Venta
+├── FarmacorpPOS.Services/               # Capa de Servicios
+│   ├── Estrategias/                     # Reglas que cambian entre Base y GanaMax
+│   ├── Express/
+│   │   ├── Categorias/                  # Asignación de Categorías
+│   │   └── Ventas/                      # Registro de Venta
+│   ├── Erp/                             # Registro Nuevo Producto ERP y Códigos de Barras
+│   └── DependencyInjection.cs           # AddBusinessServices()
 │
 └── FarmacorpPOS.ConsoleApp/             # Capa de Presentación
-    ├── Program.cs                       # Configuración del contenedor IoC
-    ├── Menus/
-    └── appsettings.json                 # Cadena de conexión
+    ├── Program.cs                       # Arma el host, registra cada capa y muestra el menú principal
+    ├── Controllers/                     # Un controller por transacción
+    └── appsettings.json                 # Cadena de conexión y estrategia activa
 ```
 
 ---
@@ -150,7 +163,7 @@ Registra una Venta Express para **un único producto**, aplicando las **Reglas d
 4. RN3 → ¿El producto tiene exactamente 1 categoría?     Sí → descuento del 30 %
 5. RN2 → Asignar el UniqueCodigo del producto a la venta
 6. RN5 → Descontar la cantidad vendida del Stock ERP
-7. UnitOfWork.SaveChanges() → la venta y la actualización del stock se confirman
+7. UnitOfWork.GuardarCambiosAsync() → la venta y la actualización del stock se confirman
    en una sola transacción (todo o nada)
 ```
 
@@ -159,23 +172,39 @@ Registra una Venta Express para **un único producto**, aplicando las **Reglas d
 ## Patrones y conceptos aplicados
 
 ### Repository
-Abstrae el acceso a datos de cada entidad mediante una interfaz genérica (`IRepository<T>`) con operaciones como `GetById`, `GetAll`, `Find`, `Add`, `Update` y `Remove`. La capa de negocio no conoce a Entity Framework directamente.
+Abstrae el acceso a datos de cada entidad mediante una interfaz genérica (`IRepository<T>`) con operaciones como `ObtenerPorIdAsync`, `ObtenerTodosAsync`, `BuscarAsync`, `ExisteAsync`, `ContarAsync`, `Agregar`, `Actualizar` y `Eliminar`. La capa de servicios no conoce a Entity Framework directamente.
 
 ### Unit of Work
-`IUnitOfWork` agrupa los repositorios y comparte un único `DbContext`, de modo que varias operaciones (por ejemplo, registrar la venta **y** actualizar el stock) se confirmen de forma **atómica** con una sola llamada a `SaveChanges()`.
+`IUnitOfWork` agrupa los repositorios y comparte un único `DbContext`, de modo que varias operaciones (por ejemplo, registrar la venta **y** actualizar el stock) se confirmen de forma **atómica** con una sola llamada a `GuardarCambiosAsync()`.
 
 ### Inversión de Control (IoC) e Inyección de Dependencias (DI)
-Las capas superiores dependen de **abstracciones** (interfaces), no de implementaciones concretas. Las dependencias se registran en el contenedor de `Microsoft.Extensions.DependencyInjection` en `Program.cs` y se inyectan por **constructor**:
+Las capas superiores dependen de **abstracciones** (interfaces), no de implementaciones concretas. Las dependencias se inyectan por **constructor** con `Microsoft.Extensions.DependencyInjection`.
+
+Cada capa registra sus propias dependencias en un `DependencyInjection.cs`, siguiendo el enfoque de [jasontaylordev/CleanArchitecture](https://github.com/jasontaylordev/CleanArchitecture). `Program.cs` solo arma el host y llama a cada capa, sin conocer sus clases concretas:
 
 ```csharp
-services.AddDbContext<FarmacorpDbContext>(o =>
-    o.UseSqlServer(configuration.GetConnectionString("FarmacorpDb")));
+var builder = Host.CreateApplicationBuilder(args);
 
-services.AddScoped<IUnitOfWork, UnitOfWork>();
-services.AddScoped<IProductoService, ProductoService>();
-services.AddScoped<ICodigoBarraService, CodigoBarraService>();
-services.AddScoped<ICategoriaService, CategoriaService>();
-services.AddScoped<IVentaService, VentaService>();
+builder.AddInfrastructureServices();   // DbContext + SQL Server
+builder.AddRepositoryServices();       // IUnitOfWork
+builder.AddBusinessServices();         // Servicios y estrategia Base / GanaMax
+
+using var host = builder.Build();
+
+await host.SeedDatabaseAsync();         // Migra la base y carga los datos iniciales
+```
+
+Por ejemplo, la capa de infraestructura:
+
+```csharp
+public static void AddInfrastructureServices(this IHostApplicationBuilder builder)
+{
+    var connectionString = builder.Configuration.GetConnectionString("FarmacorpDb")
+        ?? throw new InvalidOperationException("No se encontró la cadena de conexión 'FarmacorpDb' en appsettings.json.");
+
+    builder.Services.AddDbContext<FarmacorpDbContext>(options =>
+        options.UseSqlServer(connectionString));
+}
 ```
 
 ### Entity Framework Code First + Fluent API
@@ -229,9 +258,11 @@ public class ErpProductoConfiguration : IEntityTypeConfiguration<ErpProducto>
    {
      "ConnectionStrings": {
        "FarmacorpDb": "Server=(localdb)\\MSSQLLocalDB;Database=FarmacorpPOSExpress;Trusted_Connection=True;MultipleActiveResultSets=true"
-     }
+     },
+     "Estrategia": "Base"
    }
    ```
+   `Estrategia` acepta `Base` o `GanaMax`. Basta con cambiarla y reiniciar la aplicación para pasar de una estrategia a la otra.
 
 3. **Restaurar paquetes y compilar**
    ```bash
@@ -250,19 +281,26 @@ public class ErpProductoConfiguration : IEntityTypeConfiguration<ErpProducto>
 
 ## Migraciones de base de datos
 
-Crear la migración inicial:
+La migración inicial (`InitialCreate`) ya está incluida en `FarmacorpPOS.Infrastructure/Data/Migrations` y solo crea el esquema.
+
+**No hace falta aplicarla a mano.** Al arrancar, la aplicación ejecuta `FarmacorpDbContextSeeder`, que:
+
+1. Aplica las migraciones pendientes (crea la base si no existe).
+2. Carga los tipos de producto y las categorías iniciales.
+
+Cada dato se busca por su descripción antes de insertarlo, así el proceso se puede repetir en cada arranque sin duplicar nada. Si se agrega un tipo o una categoría nueva a la lista, solo se inserta lo que falta. Las subcategorías apuntan a su categoría padre por navegación, sin depender de Ids fijos.
+
+Si prefieres aplicar las migraciones manualmente:
 ```bash
-dotnet ef migrations add InitialCreate \
-  --project FarmacorpPOS.DataAccess \
-  --startup-project FarmacorpPOS.ConsoleApp
+dotnet ef database update --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp
 ```
 
-Aplicar las migraciones a la base de datos:
+Crear una migración nueva después de cambiar el modelo:
 ```bash
-dotnet ef database update \
-  --project FarmacorpPOS.DataAccess \
-  --startup-project FarmacorpPOS.ConsoleApp
+dotnet ef migrations add <NombreMigracion> --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp --output-dir Data/Migrations
 ```
+
+> Si solo tienes instalados runtimes más nuevos que .NET 8, antepón `DOTNET_ROLL_FORWARD=Major` a estos comandos.
 
 ---
 
