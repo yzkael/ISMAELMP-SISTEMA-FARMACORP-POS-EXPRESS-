@@ -9,6 +9,11 @@ namespace FarmacorpPOS.Services.Erp.Productos;
 
 public class ProductoErpService : IProductoErpService
 {
+    // Los mismos largos que las columnas, para avisar con un mensaje claro
+    // antes de que SQL Server rechace el registro.
+    private const int LargoMaximoNombre = 150;
+    private const int LargoMaximoObservaciones = 500;
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEstrategiaNegocio _estrategia;
 
@@ -25,9 +30,27 @@ public class ProductoErpService : IProductoErpService
             throw new ReglaNegocioException("El nombre del producto es obligatorio.");
         }
 
+        if (solicitud.Nombre.Trim().Length > LargoMaximoNombre)
+        {
+            throw new ReglaNegocioException($"El nombre admite como máximo {LargoMaximoNombre} caracteres.");
+        }
+
+        if (solicitud.Observaciones?.Trim().Length > LargoMaximoObservaciones)
+        {
+            throw new ReglaNegocioException($"Las observaciones admiten como máximo {LargoMaximoObservaciones} caracteres.");
+        }
+
         if (solicitud.Costo <= 0)
         {
             throw new ReglaNegocioException("El costo debe ser mayor a cero.");
+        }
+
+        // La base guarda el costo con 2 decimales. Si aceptáramos más, la Regla 1
+        // calcularía el precio con un costo distinto al que queda guardado
+        // (10.555 se guarda como 10.56, pero el precio saldría de 10.555).
+        if (decimal.Round(solicitud.Costo, 2) != solicitud.Costo)
+        {
+            throw new ReglaNegocioException("El costo admite como máximo 2 decimales.");
         }
 
         if (solicitud.Stock < 0)

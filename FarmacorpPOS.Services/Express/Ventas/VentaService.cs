@@ -8,6 +8,10 @@ namespace FarmacorpPOS.Services.Express.Ventas;
 
 public class VentaService : IVentaService
 {
+    // El mismo largo que la columna, para avisar antes de que SQL Server
+    // rechace la venta.
+    private const int LargoMaximoCliente = 150;
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEstrategiaNegocio _estrategia;
 
@@ -22,6 +26,11 @@ public class VentaService : IVentaService
         if (solicitud.Cantidad <= 0)
         {
             throw new ReglaNegocioException("La cantidad debe ser mayor a cero.");
+        }
+
+        if (solicitud.Cliente?.Trim().Length > LargoMaximoCliente)
+        {
+            throw new ReglaNegocioException($"El nombre del cliente admite como máximo {LargoMaximoCliente} caracteres.");
         }
 
         var producto = await _unitOfWork.ExpProductos.ObtenerPorIdAsync(solicitud.IdProducto)
