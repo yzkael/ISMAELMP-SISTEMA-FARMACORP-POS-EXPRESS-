@@ -28,7 +28,9 @@ public class Repository<T> : IRepository<T> where T : class
 
     public void Agregar(T entidad) => _dbSet.Add(entidad);
 
-    public void Actualizar(T entidad) => _dbSet.Update(entidad);
+    // Marca solo esta entidad. DbSet.Update() recorrería también sus relaciones
+    // y terminaría guardando entidades que nadie pidió actualizar.
+    public void Actualizar(T entidad) => _context.Entry(entidad).State = EntityState.Modified;
 
     public void Eliminar(T entidad) => _dbSet.Remove(entidad);
 }
