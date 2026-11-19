@@ -128,9 +128,19 @@ FarmacorpPOSExpress.sln
 │   └── DependencyInjection.cs           # AddBusinessServices() y elección de la estrategia
 │
 └── FarmacorpPOS.ConsoleApp/             # Capa de Presentación
-    ├── Program.cs                       # Arma el host, registra cada capa y muestra el menú principal
-    ├── Controllers/                     # Un controller por transacción
-    └── appsettings.json                 # Cadena de conexión y estrategia activa
+    ├── Program.cs                       # Arma el host, registra cada capa y abre el menú principal
+    ├── Menus/
+    │   └── MenuPrincipal.cs             # Bucle del menú, un scope por opción y manejo de errores
+    ├── Controllers/                     # Leen la consola, arman el DTO y llaman al servicio
+    │   ├── Erp/
+    │   │   ├── Productos/               # Registrar y listar productos
+    │   │   └── CodigosBarras/           # Asignar códigos de barras
+    │   └── Express/
+    │       ├── Categorias/              # Asignar categorías
+    │       └── Ventas/                  # Registrar ventas
+    ├── Utilidades/                      # Lectura validada de datos, tablas y formato de montos
+    ├── DependencyInjection.cs           # AddPresentationServices()
+    └── appsettings.json                 # Cadena de conexión, estrategia activa y nivel de log
 ```
 
 ---
@@ -213,10 +223,12 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.AddInfrastructureServices();   // DbContext + SQL Server
 builder.AddRepositoryServices();       // IUnitOfWork
 builder.AddBusinessServices();         // Servicios y estrategia Base / GanaMax
+builder.AddPresentationServices();     // Controllers y menú
 
 using var host = builder.Build();
 
 await host.SeedDatabaseAsync();         // Migra la base y carga los datos iniciales
+await host.Services.GetRequiredService<MenuPrincipal>().MostrarAsync();
 ```
 
 Por ejemplo, la capa de infraestructura:
@@ -331,11 +343,12 @@ dotnet ef migrations add <NombreMigracion> --project FarmacorpPOS.Infrastructure
 
 ## Uso del sistema
 
-Al ejecutar la aplicación se muestra el menú principal:
+Al ejecutar la aplicación se muestra el menú principal, con la estrategia activa en el encabezado:
 
 ```
 =========================================
-      FARMACORP POS EXPRESS
+        FARMACORP POS EXPRESS
+        Estrategia activa: Base
 =========================================
  1. Registrar nuevo producto ERP
  2. Asignar código de barras a producto
@@ -347,21 +360,43 @@ Al ejecutar la aplicación se muestra el menú principal:
 Seleccione una opción:
 ```
 
+Las opciones que piden un Id (códigos de barras, categorías y ventas) muestran antes la lista de productos y categorías disponibles. Los montos aceptan coma o punto decimal (`10,50` o `10.50`) y las fechas se escriben como `dd/mm/aaaa`. Si un dato tiene un formato inválido, se vuelve a pedir.
+
+Para **volver al menú** desde cualquier opción, escribe `x` en el dato que se esté pidiendo. La operación se cancela sin guardar nada.
+
 ### Ejemplo de venta
 
+Paracetamol 500mg, con costo Bs 10.50, una sola categoría (Analgésicos) y estrategia Base:
+
 ```
-Producto:        Paracetamol 500mg
-UniqueCodigo:    3f2b8c1e-9a4d-4e7b-b6a2-1c5d8e0f7a93
-Costo:           10.00
-Precio (RN1):    15.00
-Categorías:      1 (Analgésicos)  → aplica descuento 30 % (RN3)
-Stock antes:     20
-Cantidad:        2
------------------------------------------
-Subtotal:        30.00
-Descuento:       -9.00
-Total:           21.00
-Stock después:   18  (RN5)
+--- Registrar venta ---
+  Id   Nombre                   Tipo                   Precio  Stock  Categ.  Cód.
+  1    Paracetamol 500mg        Medicamento          Bs 15.75     20       1     1
+
+Id del producto: 1
+Cantidad: 2
+Cliente (Enter para omitir): Ana Pérez
+Venta #1 registrada (estrategia Base).
+  Producto:        Paracetamol 500mg
+  UniqueCodigo:    1b4c12f8-ca62-47ee-9689-4e99d281a572
+  Cantidad:        2
+  Precio unit.:    Bs 15.75
+  Subtotal:        Bs 31.50
+  Descuento:       -Bs 9.45
+  Total:           Bs 22.05
+  Stock restante:  18
+```
+
+- **RN1:** precio = 10.50 × 1.50 = Bs 15.75
+- **RN2:** el `UniqueCodigo` del producto queda guardado en la venta
+- **RN3:** una sola categoría → 30 % de descuento sobre Bs 31.50
+- **RN4 y RN5:** había stock suficiente y bajó de 20 a 18
+
+Si una regla no se cumple, se muestra el motivo y no se guarda nada:
+
+```
+Stock insuficiente: hay 18 unidades y se pidieron 999.
+Con la estrategia GanaMax la venta debe dejar más de 10 unidades en stock, y quedarían 10.
 ```
 
 ---

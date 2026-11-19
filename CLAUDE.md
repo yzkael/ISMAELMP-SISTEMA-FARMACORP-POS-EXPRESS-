@@ -46,7 +46,7 @@ Por qué está separado así:
 - **Infrastructure es lo único que sabe de EF Core y SQL Server.** Si mañana cambia la base o el ORM, el cambio se queda en esta capa.
 - **Repositories separa "cómo se guarda" de "qué se guarda".** Los servicios piden y guardan entidades sin saber que detrás hay un `DbContext`.
 - **Services no ve el `DbContext`.** Solo trabaja con `IUnitOfWork`, así las reglas de negocio se pueden probar sin base de datos. Repositories referencia a Infrastructure con `PrivateAssets="all"` para que el `DbContext` no le llegue a Services por referencia transitiva.
-- **Los Controllers no tienen lógica de negocio.** Leen y validan lo que escribe el usuario, llaman a un servicio y muestran el resultado. Si una regla aparece en un Controller, va en Services.
+- **Los Controllers no tienen lógica de negocio.** Leen y validan el formato de lo que escribe el usuario, arman el DTO, llaman a un servicio y muestran el resultado. Si una regla aparece en un Controller, va en Services.
 
 Reglas que aplican a todas las capas:
 
@@ -57,8 +57,20 @@ Reglas que aplican a todas las capas:
   - Cada dato se busca por su descripción antes de insertarlo, así se puede correr en cada arranque sin duplicar nada. Si mañana se agrega un tipo o una categoría a la lista, solo se inserta lo que falta.
   - Las categorías padre se guardan primero y las subcategorías apuntan a ellas por navegación, sin depender de Ids fijos.
   - Las migraciones solo describen el esquema; los datos no viven en ellas.
-- **Cada capa registra sus propias dependencias** en un `DependencyInjection.cs` en la raíz del proyecto, con un método de extensión sobre `IHostApplicationBuilder`: `AddInfrastructureServices()`, `AddRepositoryServices()` y `AddBusinessServices()`. `Program.cs` solo los llama en orden y no conoce las clases concretas de ninguna capa. Estas clases van en el namespace `Microsoft.Extensions.DependencyInjection` para que no haga falta un `using` por capa, y sus nombres siguen la convención de .NET en inglés (`Add...Services`).
+- **Cada capa registra sus propias dependencias** en un `DependencyInjection.cs` en la raíz del proyecto, con un método de extensión sobre `IHostApplicationBuilder`: `AddInfrastructureServices()`, `AddRepositoryServices()`, `AddBusinessServices()` y `AddPresentationServices()`. `Program.cs` solo los llama en orden y no conoce las clases concretas de ninguna capa. Estas clases van en el namespace `Microsoft.Extensions.DependencyInjection` para que no haga falta un `using` por capa, y sus nombres siguen la convención de .NET en inglés (`Add...Services`).
 - **Las interfaces viven al lado de su implementación** (`IRepository.cs` junto a `Repository.cs`, `IVentaService.cs` junto a `VentaService.cs`), así al abrir una carpeta se ve el contrato y quien lo cumple.
+
+## Capa de presentación (consola)
+
+- **`MenuPrincipal` crea un scope de DI por opción.** Cada operación tiene su propio `DbContext`, así lo que quedó a medias en una operación fallida no se arrastra a la siguiente.
+- **Los errores se manejan una sola vez, en `MenuPrincipal`,** y no con un `try/catch` en cada Controller.
+- **Toda lectura de datos pasa por `Utilidades/Entrada`.** Cada método insiste hasta recibir un valor con formato válido: los montos aceptan coma o punto y las fechas van en `dd/mm/aaaa`. Si la entrada se termina (Ctrl+D o un archivo redirigido), lanza `OperationCanceledException` y la app sale limpiamente en vez de quedar pidiendo datos.
+- **Escribir `x` en cualquier dato vuelve al menú.** `Entrada` lanza `VolverAlMenuException` y `MenuPrincipal` la atrapa. Nunca deja nada a medias, porque los servicios solo guardan al final. Por eso los Controllers deben leer todos los datos antes de llamar a un servicio que guarda, y cada opción que pide datos muestra `Pantalla.ComoVolver()` debajo del título.
+- **Las listas que se repiten se dibujan en `Utilidades/Tablas`.** Por ejemplo, la tabla de productos se muestra antes de pedir un Id.
+- **La cultura es `InvariantCulture`,** así los montos y las fechas se ven igual en cualquier máquina.
+- **El `ContentRootPath` es la carpeta del ejecutable,** para que `appsettings.json` se encuentre sin importar desde dónde se lance la app.
+- **El log está en `Warning`.** Si no, EF escribiría cada consulta SQL en medio del menú.
+- **Para probar contra otra base sin tocar `appsettings.json`,** se usan variables de entorno. `ConnectionStrings__FarmacorpDb` cambia la conexión (por ejemplo, a un SQL Server en Docker) y `Estrategia` cambia la estrategia.
 
 ## Modelo de datos
 
@@ -117,9 +129,9 @@ La venta es siempre de un único producto.
 
 ## Convenciones de la capa de servicios
 
-- **Errores de negocio con `ReglaNegocioException`.** Cuando el usuario pide algo que el negocio no permite (stock insuficiente, producto inexistente, categoría repetida), el servicio lanza esta excepción con un mensaje listo para mostrar. Los Controllers muestran ese mensaje tal cual y tratan cualquier otra excepción como una falla inesperada.
+- **Errores de negocio con `ReglaNegocioException`.** Cuando el usuario pide algo que el negocio no permite (stock insuficiente, producto inexistente, categoría repetida), el servicio lanza esta excepción con un mensaje listo para mostrar. `MenuPrincipal` muestra ese mensaje tal cual y trata cualquier otra excepción como una falla inesperada (la registra en el log y muestra un aviso genérico).
 - **Entrada y salida con `record`, en `Services/DTOs/`.** La consola nunca recibe entidades, así puede cambiar el modelo sin romper la presentación.
-  - **Todo método público de un servicio recibe un único DTO**, nunca parámetros sueltos como `int idProducto`. Así la firma dice qué operación es, y agregar un dato más no rompe a quien la llama.
+  - **Todo método público de un servicio que recibe datos los recibe en un único DTO**, nunca parámetros sueltos como `int idProducto`. Las consultas sin filtros (`ListarAsync()`) no llevan parámetros. Así la firma dice qué operación es, y agregar un dato más no rompe a quien la llama.
   - **Todos los nombres terminan en `DTO`**, para distinguirlos a simple vista de las entidades del dominio. Los de entrada se llaman `...SolicitudDTO` (ej. `RegistrarVentaSolicitudDTO`, `AsignarCategoriaSolicitudDTO`) y los de salida describen el resultado (ej. `VentaRegistradaDTO`).
   - Los DTOs no van junto a los servicios, sino en `DTOs/` con las mismas subcarpetas de módulo y área (ej. `DTOs/Express/Ventas/`, namespace `FarmacorpPOS.Services.DTOs.Express.Ventas`). Así las carpetas de servicios solo tienen la interfaz y su implementación, y todos los contratos de datos se encuentran en un solo lugar.
 - **Lo que calcula el sistema no viene en la solicitud.** `Precio` y `UniqueCodigo` no son parámetros, porque los define la Regla 1 y la generación automática, nunca quien registra.
