@@ -7,28 +7,58 @@ Prueba técnica de Farmacorp: un POS de consola en .NET 8 / C#. El enunciado com
 ```bash
 dotnet build FarmacorpPOSExpress.sln
 dotnet run --project FarmacorpPOS.ConsoleApp
-dotnet ef migrations add <Nombre> --project FarmacorpPOS.DataAccess --startup-project FarmacorpPOS.ConsoleApp
-dotnet ef database update     --project FarmacorpPOS.DataAccess --startup-project FarmacorpPOS.ConsoleApp
+DOTNET_ROLL_FORWARD=Major dotnet ef migrations add <Nombre> --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp --output-dir Data/Migrations
+DOTNET_ROLL_FORWARD=Major dotnet ef database update --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp
 ```
 
 - El proyecto apunta a `net8.0`. Las plantillas del SDK instalado no ofrecen net8.0, así que al crear un proyecto nuevo hay que cambiar el `TargetFramework` a mano en el `.csproj`.
 - La solución usa el formato `.sln`, no `.slnx` (`dotnet new sln --format sln`).
+- En esta máquina solo están los runtimes 9 y 10, por eso los comandos de EF llevan `DOTNET_ROLL_FORWARD=Major`.
+- No hay `IDesignTimeDbContextFactory`, igual que en [jasontaylordev/CleanArchitecture](https://github.com/jasontaylordev/CleanArchitecture). `dotnet ef` arranca la consola y toma el `DbContext` del mismo contenedor de DI que usa la app. Así la cadena de conexión vive en un solo lugar (`appsettings.json`) y las migraciones nunca apuntan a otra base. Por eso:
+  - La consola tiene que armarse con `Host.CreateApplicationBuilder`, porque es lo que `dotnet ef` sabe interceptar.
+  - El paquete `Microsoft.EntityFrameworkCore.Design` va en la consola (proyecto de inicio), no en Infrastructure.
+  - Mientras la consola no exista no se pueden generar migraciones nuevas.
+- LocalDB solo existe en Windows. En Linux se pueden generar migraciones (`migrations add` y `migrations script` no se conectan a la base), pero para aplicarlas hace falta Windows o SQL Server en Docker.
 
 ## Arquitectura
 
-Arquitectura N-Capas. Cada capa solo conoce a las de abajo:
+Arquitectura N-Capas con cinco proyectos. Cada capa solo conoce a la de abajo:
 
 ```
-FarmacorpPOS.ConsoleApp   → Presentación: menús y armado del contenedor de DI (Program.cs)
-FarmacorpPOS.Business     → Servicios con las transacciones y las reglas de negocio
-FarmacorpPOS.DataAccess   → DbContext, configuraciones Fluent API, Repositories, UnitOfWork, Migrations
-FarmacorpPOS.Domain       → Entidades. No depende de ningún otro proyecto ni paquete
+FarmacorpPOS.ConsoleApp      → Presentación: Controllers que leen la consola y llaman a los servicios. Program.cs arma el host y llama al `Add...Services()` de cada capa
+FarmacorpPOS.Services        → Transacciones y reglas de negocio, incluidas las estrategias Base y GanaMax
+FarmacorpPOS.Repositories    → IRepository<T>, Repository<T>, IUnitOfWork, UnitOfWork
+FarmacorpPOS.Infrastructure  → Data/: DbContext, configuraciones Fluent API y migraciones
+FarmacorpPOS.Domain          → Entidades. No depende de ningún otro proyecto ni paquete
 ```
 
-- **Domain no referencia a EF Core.** Las entidades son clases simples, sin atributos `[Key]`, `[Required]`, etc. Todo el mapeo va en DataAccess con `IEntityTypeConfiguration<T>`, una clase por entidad. Es requisito de la prueba usar Fluent API.
-- **Business no ve el `DbContext`.** Solo trabaja con `IUnitOfWork` y los repositorios, así la lógica se puede probar sin base de datos.
-- **Una transacción de negocio = un `SaveChanges()`.** Por ejemplo, la venta y el descuento de stock se confirman juntos, porque si uno falla el otro no debe quedar guardado.
-- **Inyección por constructor** con `Microsoft.Extensions.DependencyInjection`. Nada de `new` sobre servicios ni repositorios fuera de `Program.cs`.
+Referencias entre proyectos:
+
+| Proyecto       | Referencia a                                  |
+|----------------|-----------------------------------------------|
+| Infrastructure | Domain                                        |
+| Repositories   | Infrastructure, Domain                        |
+| Services       | Repositories, Domain                          |
+| ConsoleApp     | Services, Repositories e Infrastructure (solo para registrar todo en el contenedor de DI) |
+
+Por qué está separado así:
+
+- **Infrastructure es lo único que sabe de EF Core y SQL Server.** Si mañana cambia la base o el ORM, el cambio se queda en esta capa.
+- **Repositories separa "cómo se guarda" de "qué se guarda".** Los servicios piden y guardan entidades sin saber que detrás hay un `DbContext`.
+- **Services no ve el `DbContext`.** Solo trabaja con `IUnitOfWork`, así las reglas de negocio se pueden probar sin base de datos. Repositories referencia a Infrastructure con `PrivateAssets="all"` para que el `DbContext` no le llegue a Services por referencia transitiva.
+- **Los Controllers no tienen lógica de negocio.** Leen y validan lo que escribe el usuario, llaman a un servicio y muestran el resultado. Si una regla aparece en un Controller, va en Services.
+
+Reglas que aplican a todas las capas:
+
+- **Domain no referencia a EF Core.** Las entidades son clases simples, sin atributos `[Key]`, `[Required]`, etc. Todo el mapeo va en Infrastructure con `IEntityTypeConfiguration<T>`, una clase por entidad. Es requisito de la prueba usar Fluent API.
+- **Una transacción de negocio = un `GuardarCambiosAsync()`.** Por ejemplo, la venta y el descuento de stock se confirman juntos, porque si uno falla el otro no debe quedar guardado.
+- **Inyección por constructor** con `Microsoft.Extensions.DependencyInjection`. Nada de `new` sobre servicios ni repositorios fuera de `Program.cs`. La única excepción es `UnitOfWork`, que crea sus repositorios porque todos tienen que compartir su mismo `DbContext`. Los servicios piden `IUnitOfWork` y nunca un repositorio suelto.
+- **Datos iniciales con `FarmacorpDbContextSeeder`, no con `HasData`.** Al arrancar, la consola llama a `host.SeedDatabaseAsync()`, que aplica las migraciones pendientes y luego carga los tipos de producto y las categorías mínimas para probar las transacciones. Así quien clone el repo solo tiene que ejecutar la app.
+  - Cada dato se busca por su descripción antes de insertarlo, así se puede correr en cada arranque sin duplicar nada. Si mañana se agrega un tipo o una categoría a la lista, solo se inserta lo que falta.
+  - Las categorías padre se guardan primero y las subcategorías apuntan a ellas por navegación, sin depender de Ids fijos.
+  - Las migraciones solo describen el esquema; los datos no viven en ellas.
+- **Cada capa registra sus propias dependencias** en un `DependencyInjection.cs` en la raíz del proyecto, con un método de extensión sobre `IHostApplicationBuilder`: `AddInfrastructureServices()`, `AddRepositoryServices()` y `AddBusinessServices()`. `Program.cs` solo los llama en orden y no conoce las clases concretas de ninguna capa. Estas clases van en el namespace `Microsoft.Extensions.DependencyInjection` para que no haga falta un `using` por capa, y sus nombres siguen la convención de .NET en inglés (`Add...Services`).
+- **Las interfaces viven al lado de su implementación** (`IRepository.cs` junto a `Repository.cs`, `IVentaService.cs` junto a `VentaService.cs`), así al abrir una carpeta se ve el contrato y quien lo cumple.
 
 ## Modelo de datos
 
@@ -49,7 +79,7 @@ Así se ve de un vistazo qué pertenece al sistema original y qué agregó el ER
 
 - El namespace siempre coincide con la carpeta (ej. `FarmacorpPOS.Domain.Entities.Express.Ventas`).
 - Cualquier entidad nueva va en la carpeta de su módulo y de su área.
-- La misma separación se repite en las capas de arriba cuando aplique (por ejemplo, `Configurations/Express/Ventas` y `Configurations/Erp`).
+- La misma separación se repite en las capas de arriba cuando aplique (por ejemplo, `Infrastructure/Data/Configurations/Express/Ventas` y `Services/Erp`).
 
 | Módulo  | Entidad             | Tabla                 | Clave               |
 |---------|---------------------|-----------------------|---------------------|
@@ -65,11 +95,11 @@ Así se ve de un vistazo qué pertenece al sistema original y qué agregó el ER
 - `Categoria` se referencia a sí misma para formar jerarquías.
 - `VentaExpress.Producto` es el **nombre** del producto en texto (una copia al momento de vender). Por eso la propiedad que apunta a la entidad se llama `ExpProducto`.
 - Los montos son `decimal` y en Fluent API se mapean con `HasPrecision(18, 2)`.
-- Los `UniqueCodigo` (y `VentaExpress.UniqueProducto`) son `Guid`, con índice único. Se generan en Business con `Guid.NewGuid()` y nunca los ingresa el usuario. No usamos GUID v7: .NET 8 no lo trae y no queremos un generador propio.
+- Los `UniqueCodigo` (y `VentaExpress.UniqueProducto`) son `Guid`, con índice único. Se generan en Services con `Guid.NewGuid()` y nunca los ingresa el usuario. No usamos GUID v7: .NET 8 no lo trae y no queremos un generador propio.
 
 ## Reglas de negocio y estrategias
 
-El sistema tiene que poder cambiar entre la estrategia **Base** y **GanaMax** en cualquier momento, sin tocar código. Las reglas que cambian van detrás de una abstracción (una estrategia elegida por configuración e inyectada por DI), no en `if`s dentro de los servicios.
+El sistema tiene que poder cambiar entre la estrategia **Base** y **GanaMax** en cualquier momento, sin tocar código. Las reglas que cambian van detrás de una abstracción (`Services/Estrategias`): una estrategia por modo, elegida con la clave `Estrategia` del `appsettings.json` (`Base` o `GanaMax`) e inyectada por DI. Nada de `if`s por estrategia dentro de los servicios.
 
 | Regla | Base | GanaMax |
 |-------|------|---------|
