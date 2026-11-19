@@ -71,12 +71,18 @@ FarmacorpPOSExpress.sln
 │
 ├── FarmacorpPOS.Domain/                 # Capa de Dominio
 │   └── Entities/
-│       ├── Producto.cs                  # Producto del módulo Express
-│       ├── ProductoErp.cs               # Información ERP: Costo, UniqueCodigo, Stock
-│       ├── CodigoBarra.cs               # Códigos de barras asignados a un producto
-│       ├── Categoria.cs
-│       ├── ProductoCategoria.cs         # Relación Producto ↔ Categoría
-│       └── Venta.cs                     # Venta Express (un único producto)
+│       ├── Express/                     # Módulo Express
+│       │   ├── Productos/
+│       │   │   ├── ExpProducto.cs       # Producto base
+│       │   │   └── TipoProducto.cs
+│       │   ├── Categorias/
+│       │   │   ├── Categoria.cs         # Jerárquica (auto-referencia)
+│       │   │   └── ProductoCategoria.cs # Relación Producto ↔ Categoría
+│       │   └── Ventas/
+│       │       └── VentaExpress.cs      # Venta de un único producto
+│       └── Erp/                         # Módulo ERP
+│           ├── ErpProducto.cs           # Costo, UniqueCodigo, Stock (PK = FK a ExpProducto)
+│           └── CodigoBarra.cs           # Códigos de barras asignados a un producto
 │
 ├── FarmacorpPOS.DataAccess/             # Capa de Acceso a Datos
 │   ├── Context/
@@ -176,13 +182,13 @@ services.AddScoped<IVentaService, VentaService>();
 El modelo de base de datos se genera a partir de las clases de dominio. Toda la configuración de mapeo (claves, longitudes, precisión decimal, relaciones, índices únicos) se define con **Fluent API** en clases `IEntityTypeConfiguration<T>`, manteniendo las entidades libres de atributos de persistencia:
 
 ```csharp
-public class ProductoErpConfiguration : IEntityTypeConfiguration<ProductoErp>
+public class ErpProductoConfiguration : IEntityTypeConfiguration<ErpProducto>
 {
-    public void Configure(EntityTypeBuilder<ProductoErp> builder)
+    public void Configure(EntityTypeBuilder<ErpProducto> builder)
     {
-        builder.ToTable("ProductoErp");
-        builder.HasKey(p => p.Id);
-        builder.Property(p => p.UniqueCodigo).IsRequired().HasMaxLength(50);
+        builder.ToTable("ErpProductos");
+        builder.HasKey(p => p.IdProducto);
+        builder.Property(p => p.UniqueCodigo).IsRequired();
         builder.HasIndex(p => p.UniqueCodigo).IsUnique();
         builder.Property(p => p.Costo).HasPrecision(18, 2);
     }
@@ -282,7 +288,7 @@ Seleccione una opción:
 
 ```
 Producto:        Paracetamol 500mg
-UniqueCodigo:    PRD-000001
+UniqueCodigo:    3f2b8c1e-9a4d-4e7b-b6a2-1c5d8e0f7a93
 Costo:           10.00
 Precio (RN1):    15.00
 Categorías:      1 (Analgésicos)  → aplica descuento 30 % (RN3)
