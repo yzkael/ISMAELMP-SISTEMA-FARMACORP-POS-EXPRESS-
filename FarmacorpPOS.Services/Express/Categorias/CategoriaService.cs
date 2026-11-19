@@ -48,4 +48,19 @@ public class CategoriaService : ICategoriaService
 
         return new CategoriaAsignadaDTO(asignacion.IdDetalle, producto.Nombre, categoria.Descripcion, cantidadCategorias);
     }
+
+    public async Task<IReadOnlyList<CategoriaDTO>> ListarAsync()
+    {
+        var categorias = await _unitOfWork.Categorias.ObtenerTodosAsync();
+        var nombres = categorias.ToDictionary(c => c.IdCategoria, c => c.Descripcion);
+
+        return categorias
+            .OrderBy(c => c.IdCategoria)
+            .Select(c => new CategoriaDTO(
+                c.IdCategoria,
+                c.Descripcion,
+                c.Activo,
+                c.IdCategoriaPadre is int idPadre ? nombres.GetValueOrDefault(idPadre) : null))
+            .ToList();
+    }
 }

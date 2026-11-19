@@ -72,4 +72,48 @@ public class ProductoErpService : IProductoErpService
             producto.ErpProducto.Stock,
             _estrategia.Nombre);
     }
+
+    // Se traen las tablas completas y se cruzan en memoria porque el
+    // repositorio genérico no expone joins; para el volumen de un POS de
+    // prueba es más simple que agregar consultas específicas.
+    public async Task<IReadOnlyList<ProductoResumenDTO>> ListarAsync()
+    {
+        var productos = await _unitOfWork.ExpProductos.ObtenerTodosAsync();
+        var tipos = (await _unitOfWork.TiposProducto.ObtenerTodosAsync()).ToDictionary(t => t.IdTipoProducto, t => t.Descripcion);
+        var fichasErp = (await _unitOfWork.ErpProductos.ObtenerTodosAsync()).ToDictionary(e => e.IdProducto);
+        var categoriasPorProducto = (await _unitOfWork.ProductosCategorias.ObtenerTodosAsync())
+            .GroupBy(pc => pc.IdProducto)
+            .ToDictionary(g => g.Key, g => g.Count());
+        var codigosPorProducto = (await _unitOfWork.CodigosBarras.ObtenerTodosAsync())
+            .GroupBy(c => c.IdProducto)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return productos
+            .OrderBy(p => p.IdProducto)
+            .Select(p =>
+            {
+                fichasErp.TryGetValue(p.IdProducto, out var erp);
+                return new ProductoResumenDTO(
+                    p.IdProducto,
+                    p.Nombre,
+                    tipos.GetValueOrDefault(p.IdTipoProducto, "-"),
+                    p.Precio,
+                    p.Activo,
+                    erp?.Stock,
+                    erp?.UniqueCodigo,
+                    categoriasPorProducto.GetValueOrDefault(p.IdProducto),
+                    codigosPorProducto.GetValueOrDefault(p.IdProducto));
+            })
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<TipoProductoDTO>> ListarTiposAsync()
+    {
+        var tipos = await _unitOfWork.TiposProducto.ObtenerTodosAsync();
+
+        return tipos
+            .OrderBy(t => t.IdTipoProducto)
+            .Select(t => new TipoProductoDTO(t.IdTipoProducto, t.Descripcion))
+            .ToList();
+    }
 }

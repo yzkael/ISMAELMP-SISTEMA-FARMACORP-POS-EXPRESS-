@@ -5,4 +5,6 @@ namespace FarmacorpPOS.Services.Erp.Productos;
 public interface IProductoErpService
 {
     Task<ProductoErpRegistradoDTO> RegistrarAsync(RegistrarProductoErpSolicitudDTO solicitud);
+    Task<IReadOnlyList<ProductoResumenDTO>> ListarAsync();
+    Task<IReadOnlyList<TipoProductoDTO>> ListarTiposAsync();
 }
