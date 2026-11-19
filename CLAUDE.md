@@ -111,6 +111,21 @@ El sistema tiene que poder cambiar entre la estrategia **Base** y **GanaMax** en
 
 La venta es siempre de un único producto.
 
+- `IEstrategiaNegocio` solo contiene lo que cambia entre estrategias (RN1, el porcentaje de RN3 y RN4). La condición de RN3 (exactamente una categoría), RN2 y RN5 son iguales en ambas y viven en los servicios.
+- `AddBusinessServices()` es el único lugar que sabe qué estrategias existen. Si falta la clave `Estrategia`, usa Base; si tiene un valor desconocido, la app no arranca, porque es mejor no arrancar que vender con una regla que nadie eligió.
+- Los montos se redondean a 2 decimales con `MidpointRounding.AwayFromZero`, que es como se redondea en caja.
+
+## Convenciones de la capa de servicios
+
+- **Errores de negocio con `ReglaNegocioException`.** Cuando el usuario pide algo que el negocio no permite (stock insuficiente, producto inexistente, categoría repetida), el servicio lanza esta excepción con un mensaje listo para mostrar. Los Controllers muestran ese mensaje tal cual y tratan cualquier otra excepción como una falla inesperada.
+- **Entrada y salida con `record`, en `Services/DTOs/`.** La consola nunca recibe entidades, así puede cambiar el modelo sin romper la presentación.
+  - **Todo método público de un servicio recibe un único DTO**, nunca parámetros sueltos como `int idProducto`. Así la firma dice qué operación es, y agregar un dato más no rompe a quien la llama.
+  - **Todos los nombres terminan en `DTO`**, para distinguirlos a simple vista de las entidades del dominio. Los de entrada se llaman `...SolicitudDTO` (ej. `RegistrarVentaSolicitudDTO`, `AsignarCategoriaSolicitudDTO`) y los de salida describen el resultado (ej. `VentaRegistradaDTO`).
+  - Los DTOs no van junto a los servicios, sino en `DTOs/` con las mismas subcarpetas de módulo y área (ej. `DTOs/Express/Ventas/`, namespace `FarmacorpPOS.Services.DTOs.Express.Ventas`). Así las carpetas de servicios solo tienen la interfaz y su implementación, y todos los contratos de datos se encuentran en un solo lugar.
+- **Lo que calcula el sistema no viene en la solicitud.** `Precio` y `UniqueCodigo` no son parámetros, porque los define la Regla 1 y la generación automática, nunca quien registra.
+- **Validar antes que la base.** Aunque haya un índice único o un check constraint, el servicio valida primero para que el usuario reciba un mensaje claro y no un error de SQL. Las restricciones de la base quedan como última barrera.
+- **Cada servicio guarda una sola vez,** al final y solo si todo se cumplió.
+
 ## Estilo de código
 
 - Código, nombres y comentarios en español, igual que el dominio del enunciado.

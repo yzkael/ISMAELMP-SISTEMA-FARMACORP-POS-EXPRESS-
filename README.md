@@ -110,12 +110,22 @@ FarmacorpPOSExpress.sln
 │   └── DependencyInjection.cs           # AddRepositoryServices()
 │
 ├── FarmacorpPOS.Services/               # Capa de Servicios
-│   ├── Estrategias/                     # Reglas que cambian entre Base y GanaMax
+│   ├── DTOs/                            # Records de entrada (…Solicitud) y salida
+│   │   ├── Erp/
+│   │   │   ├── Productos/
+│   │   │   └── CodigosBarras/
+│   │   └── Express/
+│   │       ├── Categorias/
+│   │       └── Ventas/
+│   ├── Estrategias/                     # IEstrategiaNegocio, EstrategiaBase, EstrategiaGanaMax
+│   ├── Excepciones/                     # ReglaNegocioException
+│   ├── Erp/
+│   │   ├── Productos/                   # Registro Nuevo Producto ERP
+│   │   └── CodigosBarras/               # Asignación de Códigos de Barras
 │   ├── Express/
 │   │   ├── Categorias/                  # Asignación de Categorías
 │   │   └── Ventas/                      # Registro de Venta
-│   ├── Erp/                             # Registro Nuevo Producto ERP y Códigos de Barras
-│   └── DependencyInjection.cs           # AddBusinessServices()
+│   └── DependencyInjection.cs           # AddBusinessServices() y elección de la estrategia
 │
 └── FarmacorpPOS.ConsoleApp/             # Capa de Presentación
     ├── Program.cs                       # Arma el host, registra cada capa y muestra el menú principal
@@ -154,18 +164,33 @@ Registra una Venta Express para **un único producto**, aplicando las **Reglas d
 | **RN4** | Solo se permite la venta si el artículo tiene **stock disponible**. | Registro de Venta |
 | **RN5** | Como parte de la venta se **actualiza el stock** del artículo en el módulo ERP. | Registro de Venta |
 
+### Estrategia GanaMax
+
+Durante 3 meses el negocio aplica la estrategia **GanaMax**, que cambia tres reglas. El resto se mantiene igual que en Base:
+
+| N.º | Base | GanaMax |
+|-----|------|---------|
+| **RN1** | Precio = Costo × 1.50 | Precio = Costo × 1.80 |
+| **RN3** | 30 % de descuento con una única categoría | 10 % de descuento con una única categoría |
+| **RN4** | Stock disponible | Stock disponible **y** que después de la venta queden **más de 10 unidades** |
+
+Cada estrategia es una clase que implementa `IEstrategiaNegocio`, y los servicios solo conocen esa interfaz. La activa se elige con la clave `Estrategia` del `appsettings.json`, así que volver a Base es cambiar un valor y reiniciar, sin tocar código.
+
 ### Flujo del Registro de Venta
 
 ```
-1. Obtener el producto y su información ERP
-2. RN4 → ¿Stock disponible para la cantidad solicitada?  No → rechazar la venta
+1. Obtener el producto y su ficha ERP           No existe o inactivo → rechazar la venta
+2. RN4 → Validar stock según la estrategia       No cumple → rechazar la venta
 3. Calcular subtotal = Precio × Cantidad
-4. RN3 → ¿El producto tiene exactamente 1 categoría?     Sí → descuento del 30 %
-5. RN2 → Asignar el UniqueCodigo del producto a la venta
+4. RN3 → ¿El producto tiene exactamente 1 categoría?
+         Sí → descuento del 30 % (Base) o 10 % (GanaMax)
+5. RN2 → Guardar el UniqueCodigo del producto en la venta
 6. RN5 → Descontar la cantidad vendida del Stock ERP
 7. UnitOfWork.GuardarCambiosAsync() → la venta y la actualización del stock se confirman
    en una sola transacción (todo o nada)
 ```
+
+Cuando una regla no se cumple, el servicio lanza `ReglaNegocioException` con un mensaje para el usuario (por ejemplo, *"Con la estrategia GanaMax la venta debe dejar más de 10 unidades en stock, y quedarían 10."*) y no se guarda nada.
 
 ---
 
