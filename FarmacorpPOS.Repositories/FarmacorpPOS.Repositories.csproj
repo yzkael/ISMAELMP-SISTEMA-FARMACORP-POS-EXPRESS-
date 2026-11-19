@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FarmacorpPOS.Domain\FarmacorpPOS.Domain.csproj" />
+
+    <!-- PrivateAssets evita que el DbContext le llegue a Services por referencia
+         transitiva: Services solo debe poder ver IUnitOfWork. -->
+    <ProjectReference Include="..\FarmacorpPOS.Infrastructure\FarmacorpPOS.Infrastructure.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
