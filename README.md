@@ -15,7 +15,7 @@ Es un punto de venta de consola en **.NET 8 / C#** con **arquitectura N-Capas**.
 - **Express**: el módulo original, con la **Venta Express** (venta por artículo).
 - **ERP**: agregado después. Completa el producto con costo, `UniqueCodigo`, stock y códigos de barras.
 
-Implementa las cuatro transacciones pedidas, las Reglas de Negocio 1 a 5 y la estrategia **GanaMax**, que se activa o desactiva con un solo valor de configuración.
+Implementa las cuatro transacciones pedidas, las Reglas de Negocio 1 a 5 y la estrategia **GanaMax**, que se activa o se vuelve a Base en cualquier momento desde el menú, sin reiniciar la aplicación.
 
 ---
 
@@ -52,7 +52,9 @@ En Visual Studio, se marca `FarmacorpPOS.ConsoleApp` como proyecto de inicio y s
 
 ### Cambiar entre estrategia Base y GanaMax
 
-En `FarmacorpPOS.ConsoleApp/appsettings.json`:
+**Desde la aplicación, en cualquier momento:** la opción **6. Cambiar estrategia** del menú pasa de Base a GanaMax o de vuelta a Base, sin reiniciar. El cambio se aplica desde la siguiente operación, y el encabezado del menú siempre muestra la estrategia activa.
+
+**El `appsettings.json` solo define la estrategia con la que arranca la aplicación:**
 
 ```json
 {
@@ -63,7 +65,7 @@ En `FarmacorpPOS.ConsoleApp/appsettings.json`:
 }
 ```
 
-Se cambia `"Estrategia"` a `"GanaMax"` (o de vuelta a `"Base"`) y se reinicia la aplicación. El menú muestra en su encabezado la estrategia activa.
+El cambio hecho desde el menú no se guarda en ningún archivo. Al reiniciar, la aplicación vuelve a arrancar con la estrategia del `appsettings.json`. Por eso, durante los 3 meses de GanaMax conviene poner ahí `"GanaMax"`, y volver a `"Base"` cuando termine. Si la clave falta se usa Base. Si tiene un valor desconocido, la aplicación no arranca.
 
 ### Linux o macOS (SQL Server en Docker)
 
@@ -76,7 +78,7 @@ docker run -d --name farmacorp-sql -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=Farmac
 export ConnectionStrings__FarmacorpDb='Server=localhost,1433;Database=FarmacorpPOSExpress;User Id=sa;Password=Farmacorp_Local_2026!;TrustServerCertificate=True'
 dotnet run --project FarmacorpPOS.ConsoleApp
 
-# Para probar GanaMax sin tocar archivos:
+# Para arrancar directamente con GanaMax sin tocar archivos:
 Estrategia=GanaMax dotnet run --project FarmacorpPOS.ConsoleApp
 ```
 
@@ -113,7 +115,7 @@ Estrategia=GanaMax dotnet run --project FarmacorpPOS.ConsoleApp
 | RN3 – Descuento si y solo si hay una única categoría              | `VentaService` con `IEstrategiaNegocio.PorcentajeDescuentoCategoriaUnica`            |
 | RN4 – Venta solo con stock disponible                             | `IEstrategiaNegocio.ValidarStock`                                                    |
 | RN5 – Actualizar el stock del ERP al vender                       | `VentaService`, en el mismo guardado que la venta                                    |
-| Estrategia GanaMax, con vuelta a Base en cualquier momento        | `EstrategiaBase`, `EstrategiaGanaMax` y la clave `Estrategia` del `appsettings.json` |
+| Estrategia GanaMax, con vuelta a Base en cualquier momento        | `EstrategiaBase`, `EstrategiaGanaMax`, `EstrategiaService` y la opción 6 del menú     |
 
 ---
 
@@ -198,7 +200,8 @@ FarmacorpPOSExpress.sln
 │   └── DependencyInjection.cs            AddRepositoryServices()
 │
 ├── FarmacorpPOS.Services/
-│   ├── Estrategias/                      IEstrategiaNegocio, EstrategiaBase, EstrategiaGanaMax
+│   ├── Estrategias/                      IEstrategiaNegocio, EstrategiaBase, EstrategiaGanaMax,
+│   │                                     EstrategiaService (estrategia activa y cambio en caliente)
 │   ├── Excepciones/                      ReglaNegocioException
 │   ├── DTOs/                             Records de entrada (…SolicitudDTO) y salida (…DTO)
 │   ├── Erp/
@@ -207,15 +210,15 @@ FarmacorpPOSExpress.sln
 │   ├── Express/
 │   │   ├── Categorias/                   Asignación de Categorías
 │   │   └── Ventas/                       Registro de Venta
-│   └── DependencyInjection.cs            AddBusinessServices() y elección de la estrategia
+│   └── DependencyInjection.cs            AddBusinessServices() y estrategia inicial
 │
 └── FarmacorpPOS.ConsoleApp/
     ├── Program.cs
     ├── Menus/MenuPrincipal.cs            Menú, un scope de DI por opción, manejo de errores
-    ├── Controllers/                      Erp/Productos, Erp/CodigosBarras, Express/Categorias, Express/Ventas
+    ├── Controllers/                      Erp/Productos, Erp/CodigosBarras, Express/Categorias, Express/Ventas, Estrategias
     ├── Utilidades/                       Lectura validada, tablas y formato de montos
     ├── DependencyInjection.cs            AddPresentationServices()
-    └── appsettings.json                  Cadena de conexión y estrategia activa
+    └── appsettings.json                  Cadena de conexión y estrategia con la que arranca
 ```
 
 ---
@@ -280,7 +283,11 @@ FarmacorpPOSExpress.sln
 
 ### Reglas de negocio
 
-**13. Las estrategias implementan una interfaz y se eligen por configuración.** `IEstrategiaNegocio` contiene **solo lo que cambia** entre Base y GanaMax: el precio (RN1), el porcentaje de la RN3 y la validación de stock (RN4). Las reglas que no cambian (RN2, RN5 y la condición de una única categoría) viven una sola vez en los servicios. Pasar de una estrategia a otra es cambiar un valor en `appsettings.json`, sin tocar código ni `if`s por estrategia. Si la clave falta se usa Base. Si tiene un valor desconocido, la aplicación no arranca, porque es mejor no arrancar que vender con una regla que nadie eligió.
+**13. Las estrategias implementan una interfaz y se cambian en caliente.** `IEstrategiaNegocio` contiene **solo lo que cambia** entre Base y GanaMax: el precio (RN1), el porcentaje de la RN3 y la validación de stock (RN4). Las reglas que no cambian (RN2, RN5 y la condición de una única categoría) viven una sola vez en los servicios, sin `if`s por estrategia.
+
+`EstrategiaService` es una única instancia para toda la aplicación y guarda cuál estrategia está activa. Arranca con la del `appsettings.json` y la opción 6 del menú la cambia. `IEstrategiaNegocio` se resuelve **por operación** a partir de la estrategia activa, así cada venta o registro usa la estrategia vigente al empezar, y un cambio nunca la alcanza a mitad de camino. Los servicios de venta y de producto no saben que la estrategia puede cambiar: siguen recibiendo un `IEstrategiaNegocio` por constructor.
+
+Si la clave del `appsettings.json` falta se usa Base. Si tiene un valor desconocido, la aplicación no arranca, porque es mejor no arrancar que vender con una regla que nadie eligió.
 
 **14. Redondeo a 2 decimales.** Precios y descuentos se redondean con `MidpointRounding.AwayFromZero`, como en caja.
 
@@ -307,8 +314,9 @@ Algunos puntos del enunciado admiten más de una lectura. Estas son las elegidas
 | Descuento de la RN3                                                       | Se aplica sobre el subtotal (precio × cantidad).                                                                                                                                                                                    |
 | "La venta es realizada para un único producto"                            | Cada venta es de un solo producto, pero puede ser de varias unidades.                                                                                                                                                               |
 | GanaMax: "deja un Stock por encima de 10 unidades"                        | El stock restante debe ser **mayor que 10**. Si quedan 11, se permite. Si quedan 10, se rechaza.                                                                                                                                    |
-| GanaMax "durante 3 meses, permitiendo volver en cualquier momento a Base" | El cambio es manual, por configuración. No se activa ni desactiva sola por fecha, para que los precios no cambien sin que el negocio lo decida.                                                                                     |
-| Validaciones no pedidas                                                   | Se agregaron por sentido común: no se vende un producto inactivo ni uno sin ficha ERP (no tiene stock que validar ni descontar), no se asigna una categoría inactiva, y el costo y la cantidad deben ser mayores a cero.            |
+| GanaMax "durante 3 meses, permitiendo volver en cualquier momento a Base" | Se cambia desde el menú en cualquier momento, sin reiniciar. No se activa ni desactiva sola por fecha, para que los precios no cambien sin que el negocio lo decida. El `appsettings.json` solo define la estrategia de arranque. |
+| Cambiar de estrategia con productos ya registrados                        | La RN1 se aplica **al registrar** el producto, como dice el enunciado. Los precios ya registrados no se recalculan. La RN3 y la RN4 sí usan la estrategia activa al momento de cada venta.                                        |
+| Validaciones no pedidas                                                   | Se agregaron por sentido común: no se vende un producto inactivo ni uno sin ficha ERP (no tiene stock que validar ni descontar), no se asigna una categoría inactiva, el costo y la cantidad deben ser mayores a cero, el costo admite como máximo 2 decimales (si no, la RN1 calcularía el precio con un costo distinto al que guarda la base) y los textos no pueden superar el largo de su columna. |
 
 ---
 
@@ -329,6 +337,9 @@ Se probó de punta a punta, desde la consola, contra **SQL Server 2025 en Docker
 | Venta guardada                                               | `UniqueProducto` igual al `UniqueCodigo` del producto (RN2) y `Descuento` en `NULL` cuando no aplica |
 | Categoría asignada dos veces                                 | Rechazada con un mensaje claro                                                                       |
 | Dos arranques seguidos                                       | El seeder no duplica tipos ni categorías                                                             |
+| En una misma sesión: Base → GanaMax → Base desde la opción 6 | Cada registro y venta usó la estrategia activa en ese momento, sin reiniciar                          |
+| Costo con 3 decimales (Bs 10.555)                            | Rechazado con un mensaje claro                                                                       |
+| Nombre de producto o de cliente de 200 caracteres            | Rechazado con un mensaje claro, sin llegar a SQL Server                                              |
 | `"Estrategia": "Otra"`                                       | La aplicación no arranca y explica el valor esperado                                                 |
 | Cancelar con `x` a mitad de una operación                    | No se guarda nada                                                                                    |
 | `dotnet ef migrations has-pending-model-changes`             | El modelo coincide con la migración                                                                  |
@@ -347,10 +358,13 @@ Se probó de punta a punta, desde la consola, contra **SQL Server 2025 en Docker
  3. Asignar categoría a producto
  4. Registrar venta
  5. Listar productos
+ 6. Cambiar estrategia (Base / GanaMax)
  0. Salir
 =========================================
 Seleccione una opción:
 ```
+
+- La opción 6 cambia la estrategia en el acto. La siguiente operación ya usa la nueva estrategia.
 
 - Las opciones que piden un Id muestran antes los productos y categorías disponibles.
 - Los montos aceptan `10,50` o `10.50`. Las fechas se escriben `dd/mm/aaaa`.

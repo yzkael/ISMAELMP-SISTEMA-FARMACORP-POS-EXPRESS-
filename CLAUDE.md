@@ -70,7 +70,7 @@ Reglas que aplican a todas las capas:
 - **La cultura es `InvariantCulture`,** así los montos y las fechas se ven igual en cualquier máquina.
 - **El `ContentRootPath` es la carpeta del ejecutable,** para que `appsettings.json` se encuentre sin importar desde dónde se lance la app.
 - **El log está en `Warning`.** Si no, EF escribiría cada consulta SQL en medio del menú.
-- **Para probar contra otra base sin tocar `appsettings.json`,** se usan variables de entorno. `ConnectionStrings__FarmacorpDb` cambia la conexión (por ejemplo, a un SQL Server en Docker) y `Estrategia` cambia la estrategia.
+- **Para probar contra otra base sin tocar `appsettings.json`,** se usan variables de entorno. `ConnectionStrings__FarmacorpDb` cambia la conexión (por ejemplo, a un SQL Server en Docker) y `Estrategia` cambia la estrategia de arranque.
 
 ## Modelo de datos
 
@@ -111,7 +111,7 @@ Así se ve de un vistazo qué pertenece al sistema original y qué agregó el ER
 
 ## Reglas de negocio y estrategias
 
-El sistema tiene que poder cambiar entre la estrategia **Base** y **GanaMax** en cualquier momento, sin tocar código. Las reglas que cambian van detrás de una abstracción (`Services/Estrategias`): una estrategia por modo, elegida con la clave `Estrategia` del `appsettings.json` (`Base` o `GanaMax`) e inyectada por DI. Nada de `if`s por estrategia dentro de los servicios.
+El sistema tiene que poder cambiar entre la estrategia **Base** y **GanaMax** en cualquier momento, sin tocar código ni reiniciar. Las reglas que cambian van detrás de una abstracción (`Services/Estrategias`): una estrategia por modo, inyectada por DI. Nada de `if`s por estrategia dentro de los servicios.
 
 | Regla | Base | GanaMax |
 |-------|------|---------|
@@ -124,7 +124,10 @@ El sistema tiene que poder cambiar entre la estrategia **Base** y **GanaMax** en
 La venta es siempre de un único producto.
 
 - `IEstrategiaNegocio` solo contiene lo que cambia entre estrategias (RN1, el porcentaje de RN3 y RN4). La condición de RN3 (exactamente una categoría), RN2 y RN5 son iguales en ambas y viven en los servicios.
-- `AddBusinessServices()` es el único lugar que sabe qué estrategias existen. Si falta la clave `Estrategia`, usa Base; si tiene un valor desconocido, la app no arranca, porque es mejor no arrancar que vender con una regla que nadie eligió.
+- **La estrategia se cambia en caliente desde la opción 6 del menú.** `EstrategiaService` es un singleton que guarda la estrategia activa. `IEstrategiaNegocio` se registra como scoped y se resuelve desde él, así cada operación del menú toma la estrategia vigente al empezar. Los servicios piden `IEstrategiaNegocio` por constructor y no saben que puede cambiar.
+- **La clave `Estrategia` del `appsettings.json` solo define la estrategia de arranque.** El cambio desde el menú vive en memoria: al reiniciar se vuelve a la del `appsettings.json`.
+- `AddBusinessServices()` es el único lugar que sabe qué estrategias existen, y por eso las crea ahí con `new` (no tienen dependencias ni estado). Si falta la clave `Estrategia`, usa Base; si tiene un valor desconocido, la app no arranca, porque es mejor no arrancar que vender con una regla que nadie eligió.
+- La RN1 se aplica al registrar el producto: cambiar de estrategia no recalcula los precios ya guardados.
 - Los montos se redondean a 2 decimales con `MidpointRounding.AwayFromZero`, que es como se redondea en caja.
 
 ## Convenciones de la capa de servicios
