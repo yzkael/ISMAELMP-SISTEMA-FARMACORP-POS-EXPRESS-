@@ -1,4 +1,5 @@
 using FarmacorpPOS.ConsoleApp.Controllers.Erp.CodigosBarras;
+using FarmacorpPOS.ConsoleApp.Controllers.Estrategias;
 using FarmacorpPOS.ConsoleApp.Controllers.Erp.Productos;
 using FarmacorpPOS.ConsoleApp.Controllers.Express.Categorias;
 using FarmacorpPOS.ConsoleApp.Controllers.Express.Ventas;
@@ -13,13 +14,13 @@ namespace FarmacorpPOS.ConsoleApp.Menus;
 public class MenuPrincipal
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IEstrategiaNegocio _estrategia;
+    private readonly IEstrategiaService _estrategiaService;
     private readonly ILogger<MenuPrincipal> _logger;
 
-    public MenuPrincipal(IServiceScopeFactory scopeFactory, IEstrategiaNegocio estrategia, ILogger<MenuPrincipal> logger)
+    public MenuPrincipal(IServiceScopeFactory scopeFactory, IEstrategiaService estrategiaService, ILogger<MenuPrincipal> logger)
     {
         _scopeFactory = scopeFactory;
-        _estrategia = estrategia;
+        _estrategiaService = estrategiaService;
         _logger = logger;
     }
 
@@ -57,6 +58,7 @@ public class MenuPrincipal
                 "3" => sp => sp.GetRequiredService<CategoriaController>().AsignarAsync(),
                 "4" => sp => sp.GetRequiredService<VentaController>().RegistrarAsync(),
                 "5" => sp => sp.GetRequiredService<ProductoErpController>().ListarAsync(),
+                "6" => sp => sp.GetRequiredService<EstrategiaController>().CambiarAsync(),
                 _ => null,
             };
 
@@ -111,13 +113,14 @@ public class MenuPrincipal
         Console.WriteLine();
         Console.WriteLine("=========================================");
         Console.WriteLine("        FARMACORP POS EXPRESS");
-        Console.WriteLine($"        Estrategia activa: {_estrategia.Nombre}");
+        Console.WriteLine($"        Estrategia activa: {_estrategiaService.ObtenerActiva().Nombre}");
         Console.WriteLine("=========================================");
         Console.WriteLine(" 1. Registrar nuevo producto ERP");
         Console.WriteLine(" 2. Asignar código de barras a producto");
         Console.WriteLine(" 3. Asignar categoría a producto");
         Console.WriteLine(" 4. Registrar venta");
         Console.WriteLine(" 5. Listar productos");
+        Console.WriteLine(" 6. Cambiar estrategia (Base / GanaMax)");
         Console.WriteLine(" 0. Salir");
         Console.WriteLine("=========================================");
     }

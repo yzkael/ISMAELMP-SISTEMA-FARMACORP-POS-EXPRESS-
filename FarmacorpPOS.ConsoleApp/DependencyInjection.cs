@@ -1,4 +1,5 @@
 using FarmacorpPOS.ConsoleApp.Controllers.Erp.CodigosBarras;
+using FarmacorpPOS.ConsoleApp.Controllers.Estrategias;
 using FarmacorpPOS.ConsoleApp.Controllers.Erp.Productos;
 using FarmacorpPOS.ConsoleApp.Controllers.Express.Categorias;
 using FarmacorpPOS.ConsoleApp.Controllers.Express.Ventas;
@@ -16,6 +17,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<CodigoBarraController>();
         builder.Services.AddScoped<CategoriaController>();
         builder.Services.AddScoped<VentaController>();
+        builder.Services.AddScoped<EstrategiaController>();
 
         builder.Services.AddSingleton<MenuPrincipal>();
     }

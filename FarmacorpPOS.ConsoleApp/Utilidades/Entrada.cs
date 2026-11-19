@@ -28,18 +28,21 @@ public static class Entrada
         return string.IsNullOrWhiteSpace(valor) ? null : valor.Trim();
     }
 
-    public static int LeerEntero(string etiqueta, int minimo = int.MinValue)
+    public static int LeerEntero(string etiqueta, int minimo = int.MinValue, int maximo = int.MaxValue)
     {
         while (true)
         {
-            if (int.TryParse(LeerLinea(etiqueta), out var valor) && valor >= minimo)
+            if (int.TryParse(LeerLinea(etiqueta), out var valor) && valor >= minimo && valor <= maximo)
             {
                 return valor;
             }
 
-            Pantalla.Error(minimo == int.MinValue
-                ? "Ingresa un número entero."
-                : $"Ingresa un número entero mayor o igual a {minimo}.");
+            Pantalla.Error((minimo, maximo) switch
+            {
+                (int.MinValue, int.MaxValue) => "Ingresa un número entero.",
+                (_, int.MaxValue) => $"Ingresa un número entero mayor o igual a {minimo}.",
+                _ => $"Ingresa un número entre {minimo} y {maximo}.",
+            });
         }
     }
 
