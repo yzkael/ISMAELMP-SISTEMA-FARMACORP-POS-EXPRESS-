@@ -1,226 +1,162 @@
 # Sistema FARMACORP POS EXPRESS
 
-Sistema de punto de venta (POS) desarrollado en **.NET / C#** con **arquitectura N-Capas**, que integra dos módulos:
+> Antes que nada, quiero agradecer la oportunidad de participar en este proceso. Me emociona mucho la posibilidad de formar parte de **NexoCorp**, y puse en este proyecto el mismo cuidado con el que me gustaría trabajar en el equipo.
+>
+> La solución tiene una estructura **N-Capas** inspirada en dos referencias que admiro. La primera es el repositorio [CleanArchitecture de Jason Taylor](https://github.com/jasontaylordev/CleanArchitecture), de donde tomé, por ejemplo, que cada capa registre sus propias dependencias y que la base se inicialice al arrancar. La segunda es el libro de **Milan Jovanović** sobre .NET y la **Onion Architecture**, de donde viene la idea de la repository layer y la service layer.
+>
+> También los invito a revisar mi [GitHub](https://github.com/yzkael), donde está documentado mi avance y mi pasión por .NET, así como los distintos tipos de arquitectura que he ido explorando.
+>
+> — Ismael
 
-- **Módulo Express**: módulo original del sistema, orientado a la **Venta Express**, es decir, la venta por artículo.
-- **Módulo ERP**: incorporado posteriormente por decisión de los inversionistas. Agrega la funcionalidad de **catálogo e inventario base** y completa la información del producto: costo, código único del producto (`UniqueCodigo`), stock, códigos de barras, categorías, etc.
+Solución a la prueba técnica **"Desarrollo e Implementación – Sistema FARMACORP POS EXPRESS"**.
 
-La capa de presentación es una **aplicación de consola**.
+Es un punto de venta de consola en **.NET 8 / C#** con **arquitectura N-Capas**. Integra los dos módulos del enunciado:
+
+- **Express**: el módulo original, con la **Venta Express** (venta por artículo).
+- **ERP**: agregado después. Completa el producto con costo, `UniqueCodigo`, stock y códigos de barras.
+
+Implementa las cuatro transacciones pedidas, las Reglas de Negocio 1 a 5 y la estrategia **GanaMax**, que se activa o desactiva con un solo valor de configuración.
 
 ---
 
 ## Tabla de contenido
 
-1. [Tecnologías](#tecnologías)
-2. [Arquitectura](#arquitectura)
-3. [Estructura de la solución](#estructura-de-la-solución)
-4. [Transacciones implementadas](#transacciones-implementadas)
+1. [Cómo ejecutarlo](#cómo-ejecutarlo)
+2. [Requisitos del enunciado y dónde se cumplen](#requisitos-del-enunciado-y-dónde-se-cumplen)
+3. [Arquitectura](#arquitectura)
+4. [Estructura de la solución](#estructura-de-la-solución)
 5. [Reglas de negocio](#reglas-de-negocio)
-6. [Patrones y conceptos aplicados](#patrones-y-conceptos-aplicados)
-7. [Requisitos previos](#requisitos-previos)
-8. [Instalación y ejecución](#instalación-y-ejecución)
-9. [Migraciones de base de datos](#migraciones-de-base-de-datos)
-10. [Uso del sistema](#uso-del-sistema)
+6. [Decisiones de diseño](#decisiones-de-diseño)
+7. [Interpretaciones del enunciado](#interpretaciones-del-enunciado)
+8. [Cómo se verificó](#cómo-se-verificó)
+9. [Uso del sistema](#uso-del-sistema)
+10. [Migraciones de base de datos](#migraciones-de-base-de-datos)
 
 ---
 
-## Tecnologías
+## Cómo ejecutarlo
 
-| Componente            | Tecnología                                   |
-|-----------------------|----------------------------------------------|
-| Plataforma            | .NET 8                                       |
-| Lenguaje              | C#                                           |
-| Presentación          | Aplicación de Consola                        |
-| ORM                   | Entity Framework Core (Code First)           |
-| Mapeo de entidades    | Fluent API (`IEntityTypeConfiguration<T>`)   |
-| Base de datos         | SQL Server Express LocalDB                   |
-| Inyección de dependencias | `Microsoft.Extensions.DependencyInjection` |
+### Windows (SQL Server Express LocalDB)
+
+Requisitos: [.NET SDK 8](https://dotnet.microsoft.com/download) y **SQL Server Express LocalDB**, que viene con Visual Studio.
+
+```bash
+git clone https://github.com/yzkael/ISMAELMP-SISTEMA-FARMACORP-POS-EXPRESS-.git
+cd ISMAELMP-SISTEMA-FARMACORP-POS-EXPRESS-
+dotnet run --project FarmacorpPOS.ConsoleApp
+```
+
+En Visual Studio, se marca `FarmacorpPOS.ConsoleApp` como proyecto de inicio y se presiona F5.
+
+**No hace falta crear la base ni correr migraciones.** Al arrancar, la aplicación crea la base `FarmacorpPOSExpress` en LocalDB, aplica la migración y carga los tipos de producto y las categorías iniciales.
+
+### Cambiar entre estrategia Base y GanaMax
+
+En `FarmacorpPOS.ConsoleApp/appsettings.json`:
+
+```json
+{
+  "ConnectionStrings": {
+    "FarmacorpDb": "Server=(localdb)\\MSSQLLocalDB;Database=FarmacorpPOSExpress;Trusted_Connection=True;MultipleActiveResultSets=true"
+  },
+  "Estrategia": "Base"
+}
+```
+
+Se cambia `"Estrategia"` a `"GanaMax"` (o de vuelta a `"Base"`) y se reinicia la aplicación. El menú muestra en su encabezado la estrategia activa.
+
+### Linux o macOS (SQL Server en Docker)
+
+LocalDB solo existe en Windows. En otros sistemas se puede levantar SQL Server en Docker y sobrescribir la cadena de conexión con una variable de entorno, sin modificar el `appsettings.json`:
+
+```bash
+docker run -d --name farmacorp-sql -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=Farmacorp_Local_2026!' \
+  -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
+
+export ConnectionStrings__FarmacorpDb='Server=localhost,1433;Database=FarmacorpPOSExpress;User Id=sa;Password=Farmacorp_Local_2026!;TrustServerCertificate=True'
+dotnet run --project FarmacorpPOS.ConsoleApp
+
+# Para probar GanaMax sin tocar archivos:
+Estrategia=GanaMax dotnet run --project FarmacorpPOS.ConsoleApp
+```
+
+> Si la máquina solo tiene runtimes más nuevos que .NET 8, se antepone `DOTNET_ROLL_FORWARD=Major` a `dotnet run`.
+
+---
+
+## Requisitos del enunciado y dónde se cumplen
+
+### Condiciones técnicas
+
+| Requisito                                        | Cómo se cumple                                                                                                  | Dónde                                             |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| .NET / C#                                        | .NET 8 (LTS), C# 12                                                                                             | Todos los `.csproj`                               |
+| Arquitectura N-Capas                             | Cinco proyectos, y cada uno solo conoce a la capa de abajo                                                      | [Arquitectura](#arquitectura)                     |
+| Presentación en consola                          | Menú con un Controller por transacción                                                                          | `FarmacorpPOS.ConsoleApp`                         |
+| UnitOfWork                                       | `IUnitOfWork` agrupa los repositorios sobre un solo `DbContext` y confirma con un único `GuardarCambiosAsync()` | `FarmacorpPOS.Repositories/UnitsOfWork`           |
+| Repositories                                     | Repositorio genérico `IRepository<T>`                                                                           | `FarmacorpPOS.Repositories`                       |
+| Inversión de Control e Inyección de Dependencias | Cada capa registra sus dependencias en su `DependencyInjection.cs`, y todo se inyecta por constructor           | `DependencyInjection.cs` de cada proyecto         |
+| Entity Framework Code First                      | El esquema sale de las entidades, con la migración `InitialCreate`                                              | `FarmacorpPOS.Infrastructure/Data/Migrations`     |
+| Fluent API Configurations                        | Una clase `IEntityTypeConfiguration<T>` por entidad. Las entidades no tienen atributos de EF                    | `FarmacorpPOS.Infrastructure/Data/Configurations` |
+| SQL Server Express LocalDB                       | Cadena de conexión por defecto                                                                                  | `FarmacorpPOS.ConsoleApp/appsettings.json`        |
+
+### Transacciones y reglas
+
+| Requisito                                                         | Dónde                                                                                |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 1. Registro Nuevo Producto ERP, con `UniqueCodigo` automático     | `ProductoErpService.RegistrarAsync`                                                  |
+| 2. Asignación de Códigos de Barras, con `UniqueCodigo` automático | `CodigoBarraService.AsignarAsync`                                                    |
+| 3. Asignación de Categorías de Productos                          | `CategoriaService.AsignarAsync`                                                      |
+| 4. Registro de Venta de un único producto                         | `VentaService.RegistrarAsync`                                                        |
+| RN1 – Precio = costo + margen                                     | `IEstrategiaNegocio.CalcularPrecio`                                                  |
+| RN2 – `UniqueCodigo` del producto en la venta                     | `VentaService` → `VentaExpress.UniqueProducto`                                       |
+| RN3 – Descuento si y solo si hay una única categoría              | `VentaService` con `IEstrategiaNegocio.PorcentajeDescuentoCategoriaUnica`            |
+| RN4 – Venta solo con stock disponible                             | `IEstrategiaNegocio.ValidarStock`                                                    |
+| RN5 – Actualizar el stock del ERP al vender                       | `VentaService`, en el mismo guardado que la venta                                    |
+| Estrategia GanaMax, con vuelta a Base en cualquier momento        | `EstrategiaBase`, `EstrategiaGanaMax` y la clave `Estrategia` del `appsettings.json` |
 
 ---
 
 ## Arquitectura
 
-El sistema sigue una **Arquitectura N-Capas** de cinco proyectos. Cada capa tiene una única responsabilidad y solo conoce a la capa de abajo:
-
 ```
 ┌──────────────────────────────────────────┐
-│   Presentación (ConsoleApp)              │  Controllers: leen la consola y llaman a los servicios
-└───────────────────┬──────────────────────┘  Program.cs: contenedor de IoC
+│   Presentación (ConsoleApp)              │  Menú y Controllers: leen la consola,
+└───────────────────┬──────────────────────┘  arman el DTO y llaman al servicio
                     │
 ┌───────────────────▼──────────────────────┐
-│   Servicios (Services)                   │  Transacciones, Reglas de Negocio 1 a 5,
+│   Servicios (Services)                   │  Transacciones, Reglas 1 a 5,
 └───────────────────┬──────────────────────┘  estrategias Base y GanaMax
-                    │  IUnitOfWork
+                    │  solo IUnitOfWork
 ┌───────────────────▼──────────────────────┐
 │   Repositorios (Repositories)            │  IRepository<T>, UnitOfWork
 └───────────────────┬──────────────────────┘
                     │
 ┌───────────────────▼──────────────────────┐
-│   Infraestructura (Infrastructure)       │  DbContext, Fluent API, migraciones
+│   Infraestructura (Infrastructure)       │  DbContext, Fluent API, migraciones, seeder
 └───────────────────┬──────────────────────┘
                     │
 ┌───────────────────▼──────────────────────┐
-│   Dominio (Domain)                       │  Entidades del módulo Express y del módulo ERP
+│   Dominio (Domain)                       │  Entidades de Express y ERP
 └──────────────────────────────────────────┘
 
-              SQL Server LocalDB  ◄── solo Infrastructure habla con la base
+              SQL Server  ◄── solo Infrastructure habla con la base
 ```
 
----
+| Proyecto       | Referencia a                           | Responsabilidad                                                                   |
+| -------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| Domain         | Ninguno                                | Entidades sin dependencias, ni siquiera de EF Core                                |
+| Infrastructure | Domain                                 | Lo único que conoce EF Core y SQL Server                                          |
+| Repositories   | Infrastructure (privada), Domain       | Acceso a datos y unidad de trabajo                                                |
+| Services       | Repositories, Domain                   | Reglas de negocio, sin ver el `DbContext`                                         |
+| ConsoleApp     | Services, Repositories, Infrastructure | Interfaz de usuario. Referencia a las capas de abajo solo para registrarlas en DI |
 
-## Estructura de la solución
-
-```
-FarmacorpPOSExpress.sln
-│
-├── FarmacorpPOS.Domain/                 # Capa de Dominio
-│   └── Entities/
-│       ├── Express/                     # Módulo Express
-│       │   ├── Productos/
-│       │   │   ├── ExpProducto.cs       # Producto base
-│       │   │   └── TipoProducto.cs
-│       │   ├── Categorias/
-│       │   │   ├── Categoria.cs         # Jerárquica (auto-referencia)
-│       │   │   └── ProductoCategoria.cs # Relación Producto ↔ Categoría
-│       │   └── Ventas/
-│       │       └── VentaExpress.cs      # Venta de un único producto
-│       └── Erp/                         # Módulo ERP
-│           ├── ErpProducto.cs           # Costo, UniqueCodigo, Stock (PK = FK a ExpProducto)
-│           └── CodigoBarra.cs           # Códigos de barras asignados a un producto
-│
-├── FarmacorpPOS.Infrastructure/         # Capa de Infraestructura
-│   ├── Data/
-│   │   ├── FarmacorpDbContext.cs
-│   │   ├── FarmacorpDbContextSeeder.cs  # Migra y carga los datos iniciales al arrancar
-│   │   ├── Configurations/              # Fluent API, una clase por entidad
-│   │   │   ├── Express/
-│   │   │   │   ├── Productos/
-│   │   │   │   ├── Categorias/
-│   │   │   │   └── Ventas/
-│   │   │   └── Erp/
-│   │   └── Migrations/
-│   └── DependencyInjection.cs           # AddInfrastructureServices()
-│
-├── FarmacorpPOS.Repositories/           # Capa de Repositorios
-│   ├── IRepository.cs
-│   ├── Repository.cs
-│   ├── UnitsOfWork/
-│   │   ├── IUnitOfWork.cs
-│   │   └── UnitOfWork.cs
-│   └── DependencyInjection.cs           # AddRepositoryServices()
-│
-├── FarmacorpPOS.Services/               # Capa de Servicios
-│   ├── DTOs/                            # Records de entrada (…Solicitud) y salida
-│   │   ├── Erp/
-│   │   │   ├── Productos/
-│   │   │   └── CodigosBarras/
-│   │   └── Express/
-│   │       ├── Categorias/
-│   │       └── Ventas/
-│   ├── Estrategias/                     # IEstrategiaNegocio, EstrategiaBase, EstrategiaGanaMax
-│   ├── Excepciones/                     # ReglaNegocioException
-│   ├── Erp/
-│   │   ├── Productos/                   # Registro Nuevo Producto ERP
-│   │   └── CodigosBarras/               # Asignación de Códigos de Barras
-│   ├── Express/
-│   │   ├── Categorias/                  # Asignación de Categorías
-│   │   └── Ventas/                      # Registro de Venta
-│   └── DependencyInjection.cs           # AddBusinessServices() y elección de la estrategia
-│
-└── FarmacorpPOS.ConsoleApp/             # Capa de Presentación
-    ├── Program.cs                       # Arma el host, registra cada capa y abre el menú principal
-    ├── Menus/
-    │   └── MenuPrincipal.cs             # Bucle del menú, un scope por opción y manejo de errores
-    ├── Controllers/                     # Leen la consola, arman el DTO y llaman al servicio
-    │   ├── Erp/
-    │   │   ├── Productos/               # Registrar y listar productos
-    │   │   └── CodigosBarras/           # Asignar códigos de barras
-    │   └── Express/
-    │       ├── Categorias/              # Asignar categorías
-    │       └── Ventas/                  # Registrar ventas
-    ├── Utilidades/                      # Lectura validada de datos, tablas y formato de montos
-    ├── DependencyInjection.cs           # AddPresentationServices()
-    └── appsettings.json                 # Cadena de conexión, estrategia activa y nivel de log
-```
-
----
-
-## Transacciones implementadas
-
-### 1. Registro Nuevo Producto ERP
-Registra un producto junto con su información ERP (costo, stock, etc.).
-- El valor de **`UniqueCodigo`** se **genera automáticamente**.
-- Aplica la **Regla de Negocio 1** para calcular el precio.
-
-### 2. Registro de Asignación de Códigos de Barras
-Asigna uno o más códigos de barras a un producto existente.
-- El **`UniqueCodigo`** que representa el código de barras se **genera automáticamente**.
-
-### 3. Registro de Asignación de Categorías de Productos
-Asocia un producto con una o varias categorías.
-
-### 4. Registro de Venta
-Registra una Venta Express para **un único producto**, aplicando las **Reglas de Negocio 2, 3, 4 y 5**.
-
----
-
-## Reglas de negocio
-
-| N.º | Regla | Transacción |
-|-----|-------|-------------|
-| **RN1** | El **precio** del producto se determina con un **margen del 50 % sobre el costo**: `Precio = Costo × 1.50` | Registro Nuevo Producto ERP |
-| **RN2** | Se registra el **`UniqueCodigo` del producto** como parte de la venta. | Registro de Venta |
-| **RN3** | Se aplica un **descuento del 30 %** **si y solo si** el producto está asociado a **una única categoría**. | Registro de Venta |
-| **RN4** | Solo se permite la venta si el artículo tiene **stock disponible**. | Registro de Venta |
-| **RN5** | Como parte de la venta se **actualiza el stock** del artículo en el módulo ERP. | Registro de Venta |
-
-### Estrategia GanaMax
-
-Durante 3 meses el negocio aplica la estrategia **GanaMax**, que cambia tres reglas. El resto se mantiene igual que en Base:
-
-| N.º | Base | GanaMax |
-|-----|------|---------|
-| **RN1** | Precio = Costo × 1.50 | Precio = Costo × 1.80 |
-| **RN3** | 30 % de descuento con una única categoría | 10 % de descuento con una única categoría |
-| **RN4** | Stock disponible | Stock disponible **y** que después de la venta queden **más de 10 unidades** |
-
-Cada estrategia es una clase que implementa `IEstrategiaNegocio`, y los servicios solo conocen esa interfaz. La activa se elige con la clave `Estrategia` del `appsettings.json`, así que volver a Base es cambiar un valor y reiniciar, sin tocar código.
-
-### Flujo del Registro de Venta
-
-```
-1. Obtener el producto y su ficha ERP           No existe o inactivo → rechazar la venta
-2. RN4 → Validar stock según la estrategia       No cumple → rechazar la venta
-3. Calcular subtotal = Precio × Cantidad
-4. RN3 → ¿El producto tiene exactamente 1 categoría?
-         Sí → descuento del 30 % (Base) o 10 % (GanaMax)
-5. RN2 → Guardar el UniqueCodigo del producto en la venta
-6. RN5 → Descontar la cantidad vendida del Stock ERP
-7. UnitOfWork.GuardarCambiosAsync() → la venta y la actualización del stock se confirman
-   en una sola transacción (todo o nada)
-```
-
-Cuando una regla no se cumple, el servicio lanza `ReglaNegocioException` con un mensaje para el usuario (por ejemplo, *"Con la estrategia GanaMax la venta debe dejar más de 10 unidades en stock, y quedarían 10."*) y no se guarda nada.
-
----
-
-## Patrones y conceptos aplicados
-
-### Repository
-Abstrae el acceso a datos de cada entidad mediante una interfaz genérica (`IRepository<T>`) con operaciones como `ObtenerPorIdAsync`, `ObtenerTodosAsync`, `BuscarAsync`, `ExisteAsync`, `ContarAsync`, `Agregar`, `Actualizar` y `Eliminar`. La capa de servicios no conoce a Entity Framework directamente.
-
-### Unit of Work
-`IUnitOfWork` agrupa los repositorios y comparte un único `DbContext`, de modo que varias operaciones (por ejemplo, registrar la venta **y** actualizar el stock) se confirmen de forma **atómica** con una sola llamada a `GuardarCambiosAsync()`.
-
-### Inversión de Control (IoC) e Inyección de Dependencias (DI)
-Las capas superiores dependen de **abstracciones** (interfaces), no de implementaciones concretas. Las dependencias se inyectan por **constructor** con `Microsoft.Extensions.DependencyInjection`.
-
-Cada capa registra sus propias dependencias en un `DependencyInjection.cs`, siguiendo el enfoque de [jasontaylordev/CleanArchitecture](https://github.com/jasontaylordev/CleanArchitecture). `Program.cs` solo arma el host y llama a cada capa, sin conocer sus clases concretas:
+`Program.cs` solo arma el host y le pide a cada capa que se registre:
 
 ```csharp
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(...);
 
-builder.AddInfrastructureServices();   // DbContext + SQL Server
+builder.AddInfrastructureServices();   // DbContext + SQL Server + seeder
 builder.AddRepositoryServices();       // IUnitOfWork
 builder.AddBusinessServices();         // Servicios y estrategia Base / GanaMax
 builder.AddPresentationServices();     // Controllers y menú
@@ -231,119 +167,175 @@ await host.SeedDatabaseAsync();         // Migra la base y carga los datos inici
 await host.Services.GetRequiredService<MenuPrincipal>().MostrarAsync();
 ```
 
-Por ejemplo, la capa de infraestructura:
+---
 
-```csharp
-public static void AddInfrastructureServices(this IHostApplicationBuilder builder)
-{
-    var connectionString = builder.Configuration.GetConnectionString("FarmacorpDb")
-        ?? throw new InvalidOperationException("No se encontró la cadena de conexión 'FarmacorpDb' en appsettings.json.");
+## Estructura de la solución
 
-    builder.Services.AddDbContext<FarmacorpDbContext>(options =>
-        options.UseSqlServer(connectionString));
-}
+Las entidades, configuraciones, servicios, DTOs y Controllers se separan igual que el diagrama del enunciado: primero por módulo (**Express** / **ERP**) y dentro de cada módulo por área.
+
 ```
-
-### Entity Framework Code First + Fluent API
-El modelo de base de datos se genera a partir de las clases de dominio. Toda la configuración de mapeo (claves, longitudes, precisión decimal, relaciones, índices únicos) se define con **Fluent API** en clases `IEntityTypeConfiguration<T>`, manteniendo las entidades libres de atributos de persistencia:
-
-```csharp
-public class ErpProductoConfiguration : IEntityTypeConfiguration<ErpProducto>
-{
-    public void Configure(EntityTypeBuilder<ErpProducto> builder)
-    {
-        builder.ToTable("ErpProductos");
-        builder.HasKey(p => p.IdProducto);
-        builder.Property(p => p.UniqueCodigo).IsRequired();
-        builder.HasIndex(p => p.UniqueCodigo).IsUnique();
-        builder.Property(p => p.Costo).HasPrecision(18, 2);
-    }
-}
+FarmacorpPOSExpress.sln
+│
+├── FarmacorpPOS.Domain/
+│   └── Entities/
+│       ├── Express/
+│       │   ├── Productos/        ExpProducto, TipoProducto
+│       │   ├── Categorias/       Categoria (jerárquica), ProductoCategoria
+│       │   └── Ventas/           VentaExpress
+│       └── Erp/                  ErpProducto (PK = FK a ExpProducto), CodigoBarra
+│
+├── FarmacorpPOS.Infrastructure/
+│   ├── Data/
+│   │   ├── FarmacorpDbContext.cs
+│   │   ├── FarmacorpDbContextSeeder.cs   Migra y carga los datos iniciales al arrancar
+│   │   ├── Configurations/               Fluent API, una clase por entidad (Express/…, Erp/)
+│   │   └── Migrations/                   InitialCreate
+│   └── DependencyInjection.cs            AddInfrastructureServices()
+│
+├── FarmacorpPOS.Repositories/
+│   ├── IRepository.cs, Repository.cs
+│   ├── UnitsOfWork/                      IUnitOfWork, UnitOfWork
+│   └── DependencyInjection.cs            AddRepositoryServices()
+│
+├── FarmacorpPOS.Services/
+│   ├── Estrategias/                      IEstrategiaNegocio, EstrategiaBase, EstrategiaGanaMax
+│   ├── Excepciones/                      ReglaNegocioException
+│   ├── DTOs/                             Records de entrada (…SolicitudDTO) y salida (…DTO)
+│   ├── Erp/
+│   │   ├── Productos/                    Registro Nuevo Producto ERP
+│   │   └── CodigosBarras/                Asignación de Códigos de Barras
+│   ├── Express/
+│   │   ├── Categorias/                   Asignación de Categorías
+│   │   └── Ventas/                       Registro de Venta
+│   └── DependencyInjection.cs            AddBusinessServices() y elección de la estrategia
+│
+└── FarmacorpPOS.ConsoleApp/
+    ├── Program.cs
+    ├── Menus/MenuPrincipal.cs            Menú, un scope de DI por opción, manejo de errores
+    ├── Controllers/                      Erp/Productos, Erp/CodigosBarras, Express/Categorias, Express/Ventas
+    ├── Utilidades/                       Lectura validada, tablas y formato de montos
+    ├── DependencyInjection.cs            AddPresentationServices()
+    └── appsettings.json                  Cadena de conexión y estrategia activa
 ```
 
 ---
 
-## Requisitos previos
+## Reglas de negocio
 
-- [.NET SDK 8.0](https://dotnet.microsoft.com/download) o superior
-- **SQL Server Express LocalDB** (incluido con Visual Studio o instalable desde el instalador de SQL Server Express)
-- Herramienta de EF Core:
-  ```bash
-  dotnet tool install --global dotnet-ef
-  ```
+| N.º     | Regla                                                            | Base             | GanaMax                                                                      |
+| ------- | ---------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------- |
+| **RN1** | Precio del producto al registrarlo                               | Costo × 1.50     | Costo × 1.80                                                                 |
+| **RN2** | El `UniqueCodigo` del producto se guarda en la venta             | Sí               | Igual que Base                                                               |
+| **RN3** | Descuento si y solo si el producto tiene **una única categoría** | 30 %             | 10 %                                                                         |
+| **RN4** | Condición para permitir la venta                                 | Stock disponible | Stock disponible **y** que después de la venta queden **más de 10 unidades** |
+| **RN5** | La venta descuenta el stock del ERP                              | Sí               | Igual que Base                                                               |
 
-> **Nota:** LocalDB solo está disponible en **Windows**. En Linux o macOS se puede usar SQL Server en Docker y cambiar la cadena de conexión:
-> ```bash
-> docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=TuPassword123!" -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
-> ```
-> ```
-> Server=localhost,1433;Database=FarmacorpPOSExpress;User Id=sa;Password=TuPassword123!;TrustServerCertificate=True;
-> ```
+### Flujo del Registro de Venta
+
+```
+1. Obtener el producto y su ficha ERP        No existe, está inactivo o no tiene ficha ERP → rechazar
+2. RN4 → Validar stock según la estrategia    No cumple → rechazar
+3. Subtotal = Precio × Cantidad
+4. RN3 → ¿Exactamente 1 categoría?            Sí → descuento del 30 % (Base) o 10 % (GanaMax)
+5. RN2 → Guardar el UniqueCodigo del producto en la venta
+6. RN5 → Descontar la cantidad del stock ERP
+7. GuardarCambiosAsync() → la venta y el descuento de stock se guardan juntos o no se guarda nada
+```
 
 ---
 
-## Instalación y ejecución
+## Decisiones de diseño
 
-1. **Clonar el repositorio**
-   ```bash
-   git clone https://github.com/yzkael/ISMAELMP-SISTEMA-FARMACORP-POS-EXPRESS-.git
-   cd ISMAELMP-SISTEMA-FARMACORP-POS-EXPRESS-
-   ```
+### Arquitectura
 
-2. **Configurar la cadena de conexión** en `FarmacorpPOS.ConsoleApp/appsettings.json`:
-   ```json
-   {
-     "ConnectionStrings": {
-       "FarmacorpDb": "Server=(localdb)\\MSSQLLocalDB;Database=FarmacorpPOSExpress;Trusted_Connection=True;MultipleActiveResultSets=true"
-     },
-     "Estrategia": "Base"
-   }
-   ```
-   `Estrategia` acepta `Base` o `GanaMax`. Basta con cambiarla y reiniciar la aplicación para pasar de una estrategia a la otra.
+**1. Cinco capas en lugar de cuatro.** La capa de datos se dividió en **Infrastructure** (EF Core, `DbContext`, Fluent API, migraciones) y **Repositories** (repositorios y UnitOfWork). Así el detalle técnico de la base queda separado del contrato de acceso a datos que usan los servicios.
 
-3. **Restaurar paquetes y compilar**
-   ```bash
-   dotnet restore
-   dotnet build
-   ```
+**2. Services no puede ver el `DbContext`, y el compilador lo garantiza.** Repositories referencia a Infrastructure con `PrivateAssets="all"`, así que esa referencia no se propaga. Se comprobó que un proyecto que solo referencia a Repositories no puede usar `FarmacorpDbContext` (error `CS0234`). La regla no depende de la disciplina de quien programa.
 
-4. **Crear la base de datos** (ver [Migraciones](#migraciones-de-base-de-datos))
+**3. Cada capa registra sus propias dependencias.** Siguiendo el enfoque de [jasontaylordev/CleanArchitecture](https://github.com/jasontaylordev/CleanArchitecture), cada proyecto expone un método `Add...Services()` en su `DependencyInjection.cs`. `Program.cs` no conoce ninguna clase concreta de las capas.
 
-5. **Ejecutar la aplicación**
-   ```bash
-   dotnet run --project FarmacorpPOS.ConsoleApp
-   ```
+**4. Sin `IDesignTimeDbContextFactory`.** `dotnet ef` usa el host de la consola para obtener el `DbContext`. Así la cadena de conexión vive en un solo lugar (`appsettings.json`), y las migraciones nunca apuntan a una base distinta de la que usa la aplicación.
+
+**5. Repository y UnitOfWork sobre EF Core.** EF Core ya implementa ambos patrones: `DbContext` funciona como unidad de trabajo y `DbSet<T>` como repositorio. Se incluyeron porque el enunciado los pide explícitamente, y porque permiten aislar a Services de EF Core (punto 2).
+
+### Modelo de datos
+
+**6. Nombres idénticos al diagrama.** Las entidades, tablas, columnas y claves siguen el diagrama del enunciado (`ExpProductos`, `ErpProductos`, `VentaExpress`, `IdDetalle`…), para que se puedan comparar uno a uno. Las columnas que en el diagrama no están en negrita son opcionales.
+
+**7. `ErpProducto` comparte la clave con `ExpProducto`.** `IdProducto` es a la vez su clave primaria y su clave foránea, como indica el diagrama (PK, FK1). Es una relación 1 a 0..1: el ERP extiende al producto Express sin modificar su tabla.
+
+**8. `UniqueCodigo` como `Guid`.** Los códigos únicos del producto y del código de barras se generan con `Guid.NewGuid()` y tienen un índice único. Un GUID se puede generar sin consultar la base ni mantener un contador, y no choca entre registros. No se usó GUID v7 porque .NET 8 no lo trae, y como la clave clusterizada de las tablas es un `int`, el orden de estos códigos no afecta el rendimiento.
+
+**9. La venta guarda una copia del nombre y el precio.** `VentaExpress.Producto` y `VentaExpress.Precio` guardan los valores del momento de la venta, como sugiere el diagrama. Si el producto cambia de nombre o de precio, la venta sigue mostrando lo que realmente se cobró.
+
+**10. `Descuento` guarda el monto, y `NULL` cuando no aplica.** No se guarda el porcentaje, porque depende de la estrategia activa en ese momento. El monto deja constancia de cuánto se descontó de verdad.
+
+**11. Restricciones en la base como última barrera.**
+
+- Un índice único en (`IdProducto`, `IdCategoria`) impide asignar dos veces la misma categoría. Sin él, un producto con una sola categoría real contaría como dos y perdería el descuento de la RN3.
+- Un `CHECK (Stock >= 0)` impide el stock negativo.
+- Las ventas, los tipos y las categorías padre usan borrado restringido, para no perder historial.
+
+**12. Datos iniciales con un seeder, no con `HasData`.** `FarmacorpDbContextSeeder` aplica las migraciones y carga los datos al arrancar. Busca cada dato por su descripción antes de insertarlo, así se puede ejecutar en cada arranque sin duplicar nada, y las subcategorías apuntan a su padre sin Ids fijos. La migración solo describe el esquema.
+
+### Reglas de negocio
+
+**13. Las estrategias implementan una interfaz y se eligen por configuración.** `IEstrategiaNegocio` contiene **solo lo que cambia** entre Base y GanaMax: el precio (RN1), el porcentaje de la RN3 y la validación de stock (RN4). Las reglas que no cambian (RN2, RN5 y la condición de una única categoría) viven una sola vez en los servicios. Pasar de una estrategia a otra es cambiar un valor en `appsettings.json`, sin tocar código ni `if`s por estrategia. Si la clave falta se usa Base. Si tiene un valor desconocido, la aplicación no arranca, porque es mejor no arrancar que vender con una regla que nadie eligió.
+
+**14. Redondeo a 2 decimales.** Precios y descuentos se redondean con `MidpointRounding.AwayFromZero`, como en caja.
+
+**15. Errores de negocio con `ReglaNegocioException`.** Cuando algo no está permitido (stock insuficiente, categoría repetida, producto inexistente), el servicio lanza esta excepción con un mensaje listo para mostrar. La consola la distingue de una falla inesperada. Los servicios validan antes de guardar, así que una operación rechazada no deja nada a medias.
+
+**16. Entrada y salida con DTOs.** Cada método de servicio recibe un único DTO (`...SolicitudDTO`) y devuelve otro. La consola nunca recibe entidades del dominio. `Precio` y `UniqueCodigo` no forman parte de ninguna solicitud, porque los calcula el sistema.
+
+### Presentación
+
+**17. Un scope de DI por opción del menú.** Cada operación tiene su propio `DbContext`, así un error no arrastra cambios pendientes a la siguiente. Los errores se manejan en un solo lugar (`MenuPrincipal`).
+
+**18. Pensada para usarla sin conocer los Ids.** Antes de pedir un Id se muestran los productos y categorías disponibles. Los datos con formato inválido se vuelven a pedir, los montos aceptan coma o punto, y escribir `x` en cualquier dato vuelve al menú sin guardar nada.
 
 ---
 
-## Migraciones de base de datos
+## Interpretaciones del enunciado
 
-La migración inicial (`InitialCreate`) ya está incluida en `FarmacorpPOS.Infrastructure/Data/Migrations` y solo crea el esquema.
+Algunos puntos del enunciado admiten más de una lectura. Estas son las elegidas:
 
-**No hace falta aplicarla a mano.** Al arrancar, la aplicación ejecuta `FarmacorpDbContextSeeder`, que:
+| Punto del enunciado                                                       | Interpretación                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Margen del 50 % / 80 % del costo"                                        | Precio = Costo × 1.50 (o × 1.80). El margen se suma al costo.                                                                                                                                                                       |
+| "Asociado a una única categoría"                                          | Se cuentan las categorías asignadas directamente al producto. Un producto asignado solo a _Analgésicos_ (subcategoría de _Medicamentos_) tiene **una** categoría y recibe el descuento. Con cero o con dos o más, no hay descuento. |
+| Descuento de la RN3                                                       | Se aplica sobre el subtotal (precio × cantidad).                                                                                                                                                                                    |
+| "La venta es realizada para un único producto"                            | Cada venta es de un solo producto, pero puede ser de varias unidades.                                                                                                                                                               |
+| GanaMax: "deja un Stock por encima de 10 unidades"                        | El stock restante debe ser **mayor que 10**. Si quedan 11, se permite. Si quedan 10, se rechaza.                                                                                                                                    |
+| GanaMax "durante 3 meses, permitiendo volver en cualquier momento a Base" | El cambio es manual, por configuración. No se activa ni desactiva sola por fecha, para que los precios no cambien sin que el negocio lo decida.                                                                                     |
+| Validaciones no pedidas                                                   | Se agregaron por sentido común: no se vende un producto inactivo ni uno sin ficha ERP (no tiene stock que validar ni descontar), no se asigna una categoría inactiva, y el costo y la cantidad deben ser mayores a cero.            |
 
-1. Aplica las migraciones pendientes (crea la base si no existe).
-2. Carga los tipos de producto y las categorías iniciales.
+---
 
-Cada dato se busca por su descripción antes de insertarlo, así el proceso se puede repetir en cada arranque sin duplicar nada. Si se agrega un tipo o una categoría nueva a la lista, solo se inserta lo que falta. Las subcategorías apuntan a su categoría padre por navegación, sin depender de Ids fijos.
+## Cómo se verificó
 
-Si prefieres aplicar las migraciones manualmente:
-```bash
-dotnet ef database update --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp
-```
+Se probó de punta a punta, desde la consola, contra **SQL Server 2025 en Docker**, usando la misma migración y el mismo seeder que se ejecutan con LocalDB. Los casos de borde de las reglas (dos categorías, stock en cero, cantidades inválidas) se ejercitaron además con un arnés de pruebas local sobre el proveedor en memoria de EF Core. Ese arnés no forma parte de esta entrega.
 
-Crear una migración nueva después de cambiar el modelo:
-```bash
-dotnet ef migrations add <NombreMigracion> --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp --output-dir Data/Migrations
-```
-
-> Si solo tienes instalados runtimes más nuevos que .NET 8, antepón `DOTNET_ROLL_FORWARD=Major` a estos comandos.
+| Escenario                                                    | Resultado                                                                                            |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Registro con costo Bs 10.50 (Base)                           | Precio Bs 15.75 (RN1) y `UniqueCodigo` generado                                                      |
+| Venta de 2 unidades a Bs 15.75 con una sola categoría (Base) | Subtotal Bs 31.50, descuento Bs 9.45 (30 %), total Bs 22.05. Stock de 20 a 18 (RN3, RN5)             |
+| Venta de un producto sin categorías                          | Sin descuento                                                                                        |
+| Venta de un producto con dos categorías                      | Sin descuento                                                                                        |
+| Venta de 999 unidades con 18 en stock                        | Rechazada, sin cambios en la base (RN4)                                                              |
+| Registro con costo Bs 10 (GanaMax)                           | Precio Bs 18.00 (RN1)                                                                                |
+| Venta de 5 unidades a Bs 18 con una categoría (GanaMax)      | Descuento Bs 9.00 (10 %)                                                                             |
+| Venta que dejaría exactamente 10 unidades (GanaMax)          | Rechazada (RN4)                                                                                      |
+| Venta guardada                                               | `UniqueProducto` igual al `UniqueCodigo` del producto (RN2) y `Descuento` en `NULL` cuando no aplica |
+| Categoría asignada dos veces                                 | Rechazada con un mensaje claro                                                                       |
+| Dos arranques seguidos                                       | El seeder no duplica tipos ni categorías                                                             |
+| `"Estrategia": "Otra"`                                       | La aplicación no arranca y explica el valor esperado                                                 |
+| Cancelar con `x` a mitad de una operación                    | No se guarda nada                                                                                    |
+| `dotnet ef migrations has-pending-model-changes`             | El modelo coincide con la migración                                                                  |
 
 ---
 
 ## Uso del sistema
-
-Al ejecutar la aplicación se muestra el menú principal, con la estrategia activa en el encabezado:
 
 ```
 =========================================
@@ -360,9 +352,9 @@ Al ejecutar la aplicación se muestra el menú principal, con la estrategia acti
 Seleccione una opción:
 ```
 
-Las opciones que piden un Id (códigos de barras, categorías y ventas) muestran antes la lista de productos y categorías disponibles. Los montos aceptan coma o punto decimal (`10,50` o `10.50`) y las fechas se escriben como `dd/mm/aaaa`. Si un dato tiene un formato inválido, se vuelve a pedir.
-
-Para **volver al menú** desde cualquier opción, escribe `x` en el dato que se esté pidiendo. La operación se cancela sin guardar nada.
+- Las opciones que piden un Id muestran antes los productos y categorías disponibles.
+- Los montos aceptan `10,50` o `10.50`. Las fechas se escriben `dd/mm/aaaa`.
+- Escribir `x` en cualquier dato vuelve al menú sin guardar nada.
 
 ### Ejemplo de venta
 
@@ -370,6 +362,7 @@ Paracetamol 500mg, con costo Bs 10.50, una sola categoría (Analgésicos) y estr
 
 ```
 --- Registrar venta ---
+(Escribe 'x' en cualquier dato para volver al menú)
   Id   Nombre                   Tipo                   Precio  Stock  Categ.  Cód.
   1    Paracetamol 500mg        Medicamento          Bs 15.75     20       1     1
 
@@ -387,16 +380,25 @@ Venta #1 registrada (estrategia Base).
   Stock restante:  18
 ```
 
-- **RN1:** precio = 10.50 × 1.50 = Bs 15.75
-- **RN2:** el `UniqueCodigo` del producto queda guardado en la venta
-- **RN3:** una sola categoría → 30 % de descuento sobre Bs 31.50
-- **RN4 y RN5:** había stock suficiente y bajó de 20 a 18
-
 Si una regla no se cumple, se muestra el motivo y no se guarda nada:
 
 ```
 Stock insuficiente: hay 18 unidades y se pidieron 999.
 Con la estrategia GanaMax la venta debe dejar más de 10 unidades en stock, y quedarían 10.
+```
+
+---
+
+## Migraciones de base de datos
+
+La migración `InitialCreate` está en `FarmacorpPOS.Infrastructure/Data/Migrations` y la aplicación la aplica sola al arrancar. Para manejarlas a mano hace falta la herramienta `dotnet-ef` (`dotnet tool install --global dotnet-ef`):
+
+```bash
+# Aplicar migraciones
+dotnet ef database update --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp
+
+# Crear una migración nueva después de cambiar el modelo
+dotnet ef migrations add <NombreMigracion> --project FarmacorpPOS.Infrastructure --startup-project FarmacorpPOS.ConsoleApp --output-dir Data/Migrations
 ```
 
 ---
