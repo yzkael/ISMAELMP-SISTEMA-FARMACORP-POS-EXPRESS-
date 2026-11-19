@@ -19,27 +19,24 @@ public static class DependencyInjection
         builder.Services.AddScoped<IVentaService, VentaService>();
     }
 
-    // Este es el único lugar que sabe qué estrategias existen. Para volver a
-    // Base al terminar GanaMax basta con cambiar "Estrategia" en el
-    // appsettings.json y reiniciar.
+    // Este es el único lugar que sabe qué estrategias existen. Se crean aquí y
+    // no por DI porque no tienen dependencias ni estado: son solo reglas.
     private static void AddEstrategia(IHostApplicationBuilder builder)
     {
-        // Si no se configura nada, se usa Base porque es la regla normal del negocio.
-        var estrategia = builder.Configuration["Estrategia"] ?? "Base";
+        var disponibles = new IEstrategiaNegocio[] { new EstrategiaBase(), new EstrategiaGanaMax() };
 
-        if (estrategia.Equals("Base", StringComparison.OrdinalIgnoreCase))
-        {
-            builder.Services.AddSingleton<IEstrategiaNegocio, EstrategiaBase>();
-        }
-        else if (estrategia.Equals("GanaMax", StringComparison.OrdinalIgnoreCase))
-        {
-            builder.Services.AddSingleton<IEstrategiaNegocio, EstrategiaGanaMax>();
-        }
-        else
-        {
-            // Mejor no arrancar que vender con una regla que nadie eligió.
-            throw new InvalidOperationException(
-                $"Estrategia '{estrategia}' no reconocida en appsettings.json. Usa 'Base' o 'GanaMax'.");
-        }
+        // El appsettings.json solo dice con qué estrategia arranca la aplicación;
+        // después se cambia desde el menú. Si no se configura nada, se usa Base
+        // porque es la regla normal del negocio.
+        var inicial = builder.Configuration["Estrategia"] ?? "Base";
+
+        // Se crea ya, y no cuando alguien lo pida, para que un valor desconocido
+        // impida arrancar en vez de fallar en la primera venta.
+        var estrategiaService = new EstrategiaService(disponibles, inicial);
+        builder.Services.AddSingleton<IEstrategiaService>(estrategiaService);
+
+        // Scoped: cada operación del menú toma la estrategia activa al empezar.
+        // Un cambio no la alcanza a mitad de camino y vale desde la siguiente.
+        builder.Services.AddScoped<IEstrategiaNegocio>(_ => estrategiaService.Actual);
     }
 }
